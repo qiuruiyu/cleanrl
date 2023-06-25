@@ -80,6 +80,10 @@ def parse_args():
         help="the maximum norm for the gradient clipping")
     parser.add_argument("--target-kl", type=float, default=None,
         help="the target KL divergence threshold")
+    
+    # Env args 
+    parser.add_argument("--qr", metavar=('q', 'r'), type=float, nargs=2, default=(1, 1),
+        help="The (q, r) pair value for Shell env")
     args = parser.parse_args()
     args.batch_size = int(args.num_envs * args.num_steps)
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
@@ -87,13 +91,14 @@ def parse_args():
     return args
 
 
-def make_env(env_id, idx, capture_video, run_name, gamma):
+def make_env(env_id, idx, capture_video, run_name, gamma, args):
     def thunk():
         # if capture_video:
         #     env = gym.make(env_id, render_mode="rgb_array")
         # else:
         #     env = gym.make(env_id)
-        env = make_shell_env(1, 1)
+        q, r = args.qr
+        env = make_shell_env(q, r)
         # env = gym.make('Pendulum-v1')
         env = gym.wrappers.FlattenObservation(env)  # deal with dm_control's Dict observation space
         env = gym.wrappers.RecordEpisodeStatistics(env)
@@ -152,7 +157,10 @@ if __name__ == "__main__":
     # DEFINE BASIC VARIABLES AND PREPROCESSINGS
     best_rewards = -np.inf
     args = parse_args()
-    run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
+    q, r = args.qr
+    print('Q, R', q, r)
+    # run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
+    run_name = f"{args.env_id}_q_{q}_r_{r}_{args.seed}_{int(time.time())}"
     if args.save_model or args.save_best_model:
         model_path = f'./models/{run_name}'
     os.makedirs(model_path, exist_ok=True)
@@ -185,7 +193,7 @@ if __name__ == "__main__":
 
     # env setup
     envs = gym.vector.SyncVectorEnv(
-        [make_env(args.env_id, i, args.capture_video, run_name, args.gamma) for i in range(args.num_envs)]
+        [make_env(args.env_id, i, args.capture_video, run_name, args.gamma, args) for i in range(args.num_envs)]
     )
     assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
 
