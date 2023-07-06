@@ -17,6 +17,7 @@ from torch.distributions.normal import Normal
 from torch.utils.tensorboard import SummaryWriter
 from envs.shell.shell import make_shell_env
 
+# os.environ['WANDB_MODE'] = 'offline'
 
 def parse_args():
     # fmt: off
@@ -339,7 +340,7 @@ if __name__ == "__main__":
             if args.target_kl is not None:
                 if approx_kl > args.target_kl:
                     break
-
+                
         y_pred, y_true = b_values.cpu().numpy(), b_returns.cpu().numpy()
         var_y = np.var(y_true)
         explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
@@ -355,8 +356,10 @@ if __name__ == "__main__":
         writer.add_scalar("losses/explained_variance", explained_var, global_step)
         print("SPS:", int(global_step / (time.time() - start_time)))
         writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
+        wandb.watch(agent)
 
         # DO EVALUATION AND SAVE MODEL 
+
         if args.save_model and (update + 1) % args.save_interval == 0:
             torch.save(agent.state_dict(), f"./models/{run_name}/agent_{update+1}.pt")
 
