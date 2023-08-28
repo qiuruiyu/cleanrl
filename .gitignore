@@ -34,6 +34,8 @@ __pycache__/
 
 # Distribution / packaging
 .Python
+models/
+runs/
 build/
 develop-eggs/
 dist/

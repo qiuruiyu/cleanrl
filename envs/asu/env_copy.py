@@ -1,23 +1,16 @@
-from typing import Dict, List, Optional, Tuple, Union
-import numpy as np
-import matplotlib.pyplot as plt
-from scipy import io 
-import gymnasium as gym 
-from gymnasium import spaces
-from gymnasium.wrappers import NormalizeObservation, TimeAwareObservation, NormalizeReward
-from gymnasium.utils import seeding
-from stable_baselines3 import PPO, TD3, SAC, DQN
-from stable_baselines3.common.envs import SimpleMultiObsEnv
-from stable_baselines3.common import env_checker
-from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecNormalize
-from stable_baselines3.common.env_util import make_vec_env
-from stable_baselines3.common.utils import set_random_seed
-from stable_baselines3.common.callbacks import CallbackList, EvalCallback, CheckpointCallback
-import torch
 import copy
-import sys 
-import os 
-sys.path.append('./')
+import sys
+from typing import Dict, List, Optional, Tuple, Union
+
+import gymnasium as gym
+import matplotlib.pyplot as plt
+import numpy as np
+import torch
+from gymnasium import spaces
+from gymnasium.utils import seeding
+from gymnasium.wrappers import (NormalizeObservation, NormalizeReward,
+                                TimeAwareObservation)
+from scipy import io
 
 
 class ASUEnv(gym.Env):
@@ -51,14 +44,7 @@ class ASUEnv(gym.Env):
             0.317,    # 氮气纯度
             9.55,     # AI701 * 
         ]).reshape(-1, 1)
-        # self.goal = np.array([
-        #     98485, 
-        #     18940,
-        #     39772, 
-        #     1.434+0.1490, 
-        #     99.7648-0.0305, 
-        #     0.317+0.0260, 
-        #     9.57]).reshape(-1, 1)
+
         self.goal = np.array([
             99000, 
             19000,
@@ -67,6 +53,8 @@ class ASUEnv(gym.Env):
             99.7332, 
             0.3508, 
             9.3461]).reshape(-1, 1)
+        
+        self.e0 = self.goal - self.y0  # init error 
         
         self.target = self.goal / self.y0
         
@@ -93,9 +81,8 @@ class ASUEnv(gym.Env):
         # self.action_low = np.array([0, 0, 0, 0, 0, 0, 0]).astype(np.float32)
         # self.action_high = np.array([6, 4e-3, 1e-2, 2e-3, 3e3, 600, 1200]).astype(np.float32)
         self.action_high = np.array([6, 4e-3, 1e-2, 2e-3]).astype(np.float32)
-        self.action_high *= 5
+        self.action_high *= 2
         self.action_low = -self.action_high
-
 
         self.action_space = spaces.Box(
             # self.action_low, self.action_high,
@@ -132,11 +119,18 @@ class ASUEnv(gym.Env):
 
     def assign_init_state(self):
         # goal = np.repeat(self.goal, self.back, axis=1)
-        y = np.repeat(np.zeros((7, 1)), self.back, axis=1)
-        # error = np.repeat(np.ones((7, 1)), self.back, axis=1)
-        error = np.repeat(self.target-1, self.back, axis=1)
+        y = np.repeat(np.ones((7, 1)), self.back, axis=1)
+        error = np.repeat(np.ones((7, 1)), self.back, axis=1)
+        # error = np.repeat(self.target-1, self.back, axis=1)
+        # du = np.zeros((self.nu, self.back))
+        # u = np.repeat(np.zeros((self.nu, 1)), self.back, axis=1)
+
+        # y = np.repeat(self.y0, self.back, axis=1)
+        # error = np.repeat(self.goal-self.y0, self.back, axis=1)
         du = np.zeros((self.nu, self.back))
         u = np.repeat(np.zeros((self.nu, 1)), self.back, axis=1)
+
+
         if self.obs_dict:
             init_state = {
                 # "goal": goal,
@@ -179,12 +173,11 @@ class ASUEnv(gym.Env):
         hstack current state value
         '''
         y_ = np.hstack((
-            y_[:, 1:], current_y - 1
+            y_[:, 1:], current_y,
         ))
 
         error_ = np.hstack((
             error_[:, 1:], current_error
-            # error_[:, 1:], current_error + error_[:, -1].reshape(-1, 1)  # integral error 
         ))
         
         du_ = np.hstack((
@@ -192,7 +185,7 @@ class ASUEnv(gym.Env):
         ))        
         
         u_ = np.hstack((
-            u_[:, 1:], current_u - 1
+            u_[:, 1:], current_u
         ))
         
         '''
@@ -329,11 +322,8 @@ class ASUEnv(gym.Env):
         # self.ysim[self.num_step, :] = tmp_y.squeeze() 
         self.calculation_output()
 
-        # current_error = (self.goal - self.ysim[self.num_step, :].reshape(-1, 1)) / (self.goal - self.y0)
         current_y = self.ysim[self.num_step, :].reshape(-1, 1) / self.y0
-        current_error = self.target - current_y
-        # print(current_error)
-        # current_error = self.ysim[self.num_step, :].reshape(-1, 1) - self.goal
+        current_error = (self.goal - self.ysim[self.num_step, :].reshape(-1, 1)) / self.e0
         self.update_state((current_y, current_error, action, self.u))
 
         '''
@@ -347,11 +337,7 @@ class ASUEnv(gym.Env):
         if self.num_step == self.Tsim:
             # self.render_plot()
             truncated = True
-        reward -= np.sum(current_error**2) * 100
-        # reward -= np.sum(self.Q.dot(current_error**2))
-                        #   + self.R.dot(action**2))
-        # reward -= np.sum(self.Q.dot(current_error[:-1, :]**2))
-                        #   + self.R.dot(action**2))
+        reward -= np.sum(current_error**2)
 
         self.total_reward[-1] += reward 
 
@@ -385,14 +371,7 @@ class ASUEnv(gym.Env):
 
         return self.state, {} 
 
-    # dulb = [0, 0,    0,    0,    0, -inf, -inf]';
-    # duub = [6, 0.004, 0.01, 0.002, inf, inf, inf]';
-    # ulb = [93000, 56, 47, 57, 93000, 17900, 37000]';
-    # uub = [99000, 60, 57, 58.5, 99000, 19000, 40000]';
-
-
 def make_asu_env(rank=0, seed=0):
-    # def _init():
     env = ASUEnv(
         {
             'Tsim': 800,
@@ -401,26 +380,6 @@ def make_asu_env(rank=0, seed=0):
     )
     env.reset(seed=seed+rank)
     return env
-    # set_random_seed(seed)
-    # return _init
-
-
-def square_schedule(init_value: float):
-    """
-    Linear learning rate schedule.
-    :param init_value: initial learning rate
-    :return: schedule that computes current learning rate
-    depending on remaining progress
-    """
-    def func(progress_remaining: float) -> float:
-        """
-        Progress will decrease from 1 to 0
-        :param progress_remaining:
-        :return: current learning rate
-        """
-        return init_value / (2**(1-progress_remaining))
-    return func
-
 
 
 if __name__ == "__main__":
@@ -433,188 +392,3 @@ if __name__ == "__main__":
             'obs_dict': False
         }
     )
-    # eval_env = DummyVecEnv([make_env(1)])
-    # eval_env = VecNormalize(eval_env, clip_obs=1000, clip_reward=1000)
-
-    # config = {
-    #     'policy_type': 'MlpPolicy',
-    #     'total_timesteps': 10000000,
-    # }
-
-    # run = wandb.init(
-    #     project='sb3',
-    #     config=config,
-    #     sync_tensorboard=True
-    # )
-
-    # wandb_callback = WandbCallback(
-    #     model_save_path='./sb3_train/wandb_model/',
-    #     verbose=2,
-    # )
-
-    eval_callback = EvalCallback(
-        eval_env=eval_env,
-        best_model_save_path='./sb3_train_error/best_model/',
-        log_path='./sb3_train_error/log/',
-        eval_freq=8000,
-        deterministic=True,
-        verbose=1,
-    )
-
-    checkpoint_callback = CheckpointCallback(
-        save_freq=20480,
-        save_path='./sb3_train_error/checkpoint/',
-        # save_replay_buffer=True,
-        save_vecnormalize=True,
-    )
-
-    callback_list = CallbackList([eval_callback, checkpoint_callback])
-
-    policy_kwargs = dict(net_arch=dict(pi=[64, 64], vf=[64, 64]))
-
-    agent = PPO(
-        policy='MlpPolicy',
-        env=eval_env,
-        policy_kwargs=policy_kwargs,
-        n_steps=8000,
-        batch_size=600,
-        verbose=2,
-        tensorboard_log='./',
-        learning_rate=square_schedule(1e-3),
-        gamma=0.99
-    )
-
-    # agent = DQN(
-    #     policy='MlpPolicy',
-    #     env=eval_env,
-    #     learning_rate=square_schedule(5e-4),
-    #     learning_starts=50000,
-    #     batch_size=320,
-    #     exploration_initial_eps=1.0,
-    #     exploration_final_eps=0.05,
-    #     tensorboard_log='./',
-    #     verbose=2
-    # )
-
-    # agent = SAC(
-    #     policy='MlpPolicy',
-    #     env=eval_env,
-    #     learning_rate=square_schedule(1e-3),
-    #     batch_size=640,
-    #     learning_starts=10000,
-    #     # optimize_memory_usage=True,
-    #     tensorboard_log='./',
-    #     verbose=2
-    # )
-
-    # agent = TD3(
-    #     policy='MlpPolicy',
-    #     env=eval_env,
-    #     learning_rate=5e-4,
-    #     learning_starts=10000,
-    #     buffer_size=30000,
-    #     batch_size=500,
-    #     train_freq=(1, 'episode'),
-    #     tensorboard_log='./mbp/',
-    #     verbose=1,
-    # )
-
-    agent.learn(
-        total_timesteps=1000000,
-        progress_bar=True,
-        callback=callback_list,
-        )
-
-    '''
-    --------------------------------------------------------------------------------
-    --------------------------------  RAY FRAMEWORK --------------------------------
-    --------------------------------------------------------------------------------
-    '''
-
-    # ray.init() 
-
-    # # register_env('ASU-v0', lambda cfg: NormalizeReward(TimeAwareObservation(ASUEnv(cfg))))
-    # register_env('ASU-v0', lambda cfg: ASUEnv(cfg))
-
-    # print('-------------- Env registeration done -----------------')
-    # # algo_cfg = ppo.PPOConfig()
-    # # algo_cfg = sac.SACConfig()
-    # algo_cfg = dqn.DQNConfig()
-    # algo_cfg.environment(
-    #     env='ASU-v0',
-    #     disable_env_checking=True,
-    #     env_config={
-    #         'Tsim':1000,
-    #         'obs_dict': False
-    #     },
-    #     auto_wrap_old_gym_envs=True,
-    # )
-    # algo_cfg.rollouts(
-    #     num_rollout_workers=15,
-    #     num_envs_per_worker=1
-    # )
-    # algo_cfg.resources(
-    #     num_cpus_per_worker=1,
-    # )
-    # algo_cfg.framework('torch')
-    # algo_cfg.training(
-    #     lr_schedule=[
-    #         [0, 5e-4],
-    #         [1000000, 5e-5],
-    #         [2000000, 5e-6],
-    #         [4000000, 5e-7]
-    #     ],
-    #     gamma=0.99,    
-    #     clip_param=0.2,
-    #     use_gae=True,
-    #     lambda_=0.95,
-    # )
-    # algo_cfg.model
-    # '''
-    # config for PPO 
-    # '''
-    # algo_cfg.train_batch_size = 20000
-    # algo_cfg.sgd_minibatch_size = 5000
-    # algo_cfg.num_sgd_iter = 10
-    # '''
-    # config for SAC
-    # '''
-    # # algo_cfg.n_step = 20 
-    # # algo_cfg.train_batch_size = 25000
-    # # algo_cfg.num_steps_sampled_before_learning_starts = 1e4
-    # # algo_cfg.target_network_update_freq = 1e4 
-
-    # # algo_cfg.replay_buffer_config['capacity'] = int(5e4)
-    # algo_cfg.debugging(log_level='INFO')
-    # algo_cfg.evaluation(
-    #     evaluation_num_workers=1,
-    #     evaluation_duration=10,
-    #     evaluation_duration_unit='episodes',
-    # )
-
-    # # MODEL_DEFAULTS['fcnet_hiddens'] = [64, 64]
-    # # MODEL_DEFAULTS['fcnet_activation'] = 'relu'
-    # # MODEL_DEFAULTS['use_attention'] = True
-    # # algo_cfg.model = MODEL_DEFAULTS
-
-    # algo = algo_cfg.build()
-
-    # print('----------------- Algorithm build done ---------------------')
-
-    # episode_reward = [] 
-
-    # for i in range(50000):
-    #     res_train = algo.train()
-    #     print('------------------ iteration ' + str(i) + '------------------')
-    #     print(pretty_print(res_train['sampler_results']))
-    #     # print(res_train['sampler_results']['episode_reward_mean'])
-    #     print(pretty_print(res_train['info']['learner']))
-    #     episode_reward.append(res_train['hist_stats']['episode_reward'])  # sampled reward for each episode from each sub worker
-    #     if i % 20 == 0 and i > 5:
-    #         algo.save('./model/iteration_' + str(i))
-    #         try:
-    #             np.save('./model/iteration_' + str(i), np.array(episode_reward))
-    #         except:
-    #             pass 
-
-    # ray.shutdown() 

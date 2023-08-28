@@ -173,7 +173,7 @@ class ShellEnv(gym.Env):
         '''
         # self.q = np.array([1, 1, 1])
         # self.r = np.array([1, 1, 1])
-        reward -= np.sum(self.q.dot(e**2) + self.r.dot(action**2))
+        reward -= np.sum(self.q.dot(e**2) + self.r.dot(self.du**2))
         # reward -= np.sum(self.q.dot(np.abs(e)) + self.r.dot(np.abs(self.du)))
 
         self.total_reward[-1] += reward
@@ -181,6 +181,7 @@ class ShellEnv(gym.Env):
         return self.state, reward, terminated, truncated, {}
 
     def reset(self, *, seed: Optional[int]=None, options: Optional[dict] = None):
+        # self.goal = np.random.rand() * 5 * np.ones((self.ny, self.Tsim))
         goal = self.goal[:, -self.back:]
         error = self.goal[:, -self.back:]
         action = np.zeros((self.nu, self.back))
@@ -231,7 +232,22 @@ if __name__ == "__main__":
     agent = PPO(
         policy='MlpPolicy',
         env=env,
-        verbose=1
+        verbose=1,
+        # tensorboard_log='./logs/',
     )
 
-    agent.learn(total_timesteps=1000000)
+    agent.learn(total_timesteps=2000000)
+    # agent.save('./models/agent')
+
+
+    # agent = PPO.load('./models/agent.zip')
+    # y = [] 
+    # next_obs, _ = env.reset()
+    # t = 0 
+    # while True:
+    #     y.append(np.array(env.y).squeeze())
+    #     action, _ = agent.predict(env.state)
+    #     next_obs, r, d1, d2, _ = env.step(action)
+    #     if d1 or d2: 
+    #         break
+    # y = np.array(y)

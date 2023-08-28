@@ -1,11 +1,12 @@
 # docs and experiment results can be found at https://docs.cleanrl.dev/rl-algorithms/ppo/#ppo_continuous_actionpy
 import argparse
-import os
-import sys
-import random
-import time
 import copy
+import os
+import random
+import sys
+import time
 from distutils.util import strtobool
+
 sys.path.append('./')
 
 import gymnasium as gym
@@ -15,6 +16,9 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.distributions.normal import Normal
 from torch.utils.tensorboard import SummaryWriter
+
+from envs.asu.env_copy import make_asu_env
+from envs.parafoil.simple_env import make_parafoil_env
 from envs.shell.shell import make_shell_env
 
 # os.environ['WANDB_MODE'] = 'offline'
@@ -49,7 +53,7 @@ def parse_args():
     # Algorithm specific arguments
     parser.add_argument("--env-id", type=str, default="HalfCheetah-v4",
         help="the id of the environment")
-    parser.add_argument("--total-timesteps", type=int, default=10000000,
+    parser.add_argument("--total-timesteps", type=int, default=20000000,
         help="total timesteps of the experiments")
     parser.add_argument("--learning-rate", type=float, default=3e-4,   
         help="the learning rate of the optimizer")
@@ -71,7 +75,7 @@ def parse_args():
         help="Toggles advantages normalization")
     parser.add_argument("--clip-coef", type=float, default=0.2,
         help="the surrogate clipping coefficient")
-    parser.add_argument("--clip-vloss", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
+    parser.add_argument("--clip-vloss", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
         help="Toggles whether or not to use a clipped loss for the value function, as per the paper.")
     parser.add_argument("--ent-coef", type=float, default=0.0,
         help="coefficient of the entropy")
@@ -98,14 +102,18 @@ def make_env(env_id, idx, capture_video, run_name, gamma, args):
         #     env = gym.make(env_id, render_mode="rgb_array")
         # else:
         #     env = gym.make(env_id)
-        q, r = args.qr
-        env = make_shell_env(q, r)
+        # q, r = args.qr
+        # env = make_shell_env(q, r)
+        # env = make_asu_env(idx)
+        env = make_parafoil_env() 
         # env = gym.make('Pendulum-v1')
         env = gym.wrappers.FlattenObservation(env)  # deal with dm_control's Dict observation space
+        # env = gym.wrappers.NormalizeObservation(env)
         env = gym.wrappers.RecordEpisodeStatistics(env)
         if capture_video:
             if idx == 0:
                 env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
+        # env = gym.wrappers.NormalizeReward(env, gamma=gamma)
         env = gym.wrappers.ClipAction(env)
         # env = gym.wrappers.NormalizeObservation(env)
         # env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10))
@@ -161,7 +169,8 @@ if __name__ == "__main__":
     q, r = args.qr
     print('Q, R', q, r)
     # run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
-    run_name = f"{args.env_id}_q_{q}_r_{r}_{args.seed}_{int(time.time())}"
+    # run_name = f"{args.env_id}_q_{q}_r_{r}_{args.seed}_{int(time.time())}"
+    run_name = f"{args.env_id}_{args.seed}_{int(time.time())}"
     if args.save_model or args.save_best_model:
         model_path = f'./models/{run_name}'
     os.makedirs(model_path, exist_ok=True)
@@ -199,7 +208,7 @@ if __name__ == "__main__":
     assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
 
     agent = Agent(envs).to(device)
-    optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate)
+    optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
     # ALGO Logic: Storage setup
     obs = torch.zeros((args.num_steps, args.num_envs) + envs.single_observation_space.shape).to(device)
@@ -258,7 +267,7 @@ if __name__ == "__main__":
                 writer.add_scalar("charts/episodic_length", info["episode"]["l"], global_step)
 
                 if args.save_best_model:
-                    if (update + 1) % args.save_interval == 0 and info['episode']['r'] > best_rewards:
+                    if info['episode']['r'] > best_rewards:
                         best_rewards = info['episode']['r']
                         torch.save(agent.state_dict(), os.path.join(model_path, 'best_agent.pt'))
 
@@ -356,7 +365,6 @@ if __name__ == "__main__":
         writer.add_scalar("losses/explained_variance", explained_var, global_step)
         print("SPS:", int(global_step / (time.time() - start_time)))
         writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
-        wandb.watch(agent)
 
         # DO EVALUATION AND SAVE MODEL 
 
