@@ -81,9 +81,9 @@ class Parafoil(gym.Env):
         # assert obs.shape == (self.nobs, self.nstack), "obs shape should be (nobs, nstack)"
         obs = obs.copy()
         if not inverse:
-            obs[:3, -1] /= 900
+            obs[:3, -1] /= 600
         else:
-            obs[:3, -1] *= 900
+            obs[:3, -1] *= 600
         return obs
 
     def _update_state(self, du):
@@ -93,9 +93,9 @@ class Parafoil(gym.Env):
         dgamma = du * self.dt
         self.state[:, :-1] = self.state[:, 1:]
         self.state[:, -1] = np.vstack((
-            self.state[0, -1] + dx / 900,
-            self.state[1, -1] + dy / 900,
-            self.state[2, -1] + dz / 900,
+            self.state[0, -1] + dx / 600,
+            self.state[1, -1] + dy / 600,
+            self.state[2, -1] + dz / 600,
             self.vs,
             self.vz,
             self.state[5, -1] + dgamma,
@@ -122,12 +122,12 @@ class Parafoil(gym.Env):
 
         # reward for moving towards goal
         reward -= (
-            2 * np.sum(self.state[:2, -1]**2) / (np.abs(self.state[2, -1]) * 900) + 
+            4 * np.sum(self.state[:2, -1]**2) / (np.abs(self.state[2, -1]) * 600) + 
             2 * np.sum(du**2)
         ) 
 
         # reward for moving towards np.pi angle 
-        reward -= 2 * np.abs(self.state[5, -1] - np.pi) / (np.abs(self.state[2, -1]) * 900)
+        reward -= 2 * np.abs(self.state[5, -1] - np.pi) / (np.abs(self.state[2, -1]) * 600)
 
         if self.state[2, -1] < 1e-6:
             print(f'parafoil landed at: ({self.state[0, -1]}, {self.state[1, -1]}, {self.state[2, -1]})')
@@ -135,7 +135,7 @@ class Parafoil(gym.Env):
             
             # reward for landing at goal (terminal reward)
             if np.abs(self.state[0, -1]) < 0.5 and np.abs(self.state[1, -1]) < 0.5:
-                reward += (np.exp(-(self.state[:2, -1]**2)) * 100 - 70).sum()
+                reward += (np.exp(-(self.state[:2, -1]**2)) * 100 - 65).sum()
 
         if self.num_steps > 10000:
             truncated = True
@@ -146,6 +146,8 @@ class Parafoil(gym.Env):
         if seed is not None:
             super().reset(seed=seed)
 
+        self.start_point = np.random.uniform(-600, 600, size=(3, 1))
+        self.start_point[-1] = 900
         self.num_steps = 0
         self.traj = [] 
         self._init_obs()
@@ -154,7 +156,7 @@ class Parafoil(gym.Env):
 
 
 def make_parafoil_env():
-    return Parafoil(dt=1, nstack=50)
+    return Parafoil(dt=1, nstack=1)
 
 
 if __name__ == "__main__":

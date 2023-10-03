@@ -5,7 +5,6 @@ from typing import Dict, List, Optional, Tuple, Union
 import gymnasium as gym
 import matplotlib.pyplot as plt
 import numpy as np
-import torch
 from gymnasium import spaces
 from gymnasium.utils import seeding
 from gymnasium.wrappers import (NormalizeObservation, NormalizeReward,
@@ -24,7 +23,8 @@ class ASUEnv(gym.Env):
         self.obs_dict = env_config['obs_dict'] if 'obs_dict' in env_config.keys() else False
         self.nu = 4
         self.ny = 7
-        self.back = self.Tsim
+        self.back = 100
+        # self.back = self.Tsim
         self.total_reward = []
         self.u0 = np.array([
             93285,  # 空气调节
@@ -54,9 +54,12 @@ class ASUEnv(gym.Env):
             0.3508, 
             9.3461]).reshape(-1, 1)
         
-        self.e0 = self.goal - self.y0  # init error 
+        # self.e0 = self.goal - self.y0  # init error 
+        self.e0_real = self.goal - self.y0  # init real error 
+        self.e0 = (self.goal - self.y0) / self.e0_real  # init scaled error 
         
-        self.target = self.goal / self.y0
+        # self.target = self.goal / self.y0
+        self.target = np.zeros((self.ny, 1))
         
         # weight parameters 
         self.Q = np.ones((1, self.ny))
@@ -81,7 +84,7 @@ class ASUEnv(gym.Env):
         # self.action_low = np.array([0, 0, 0, 0, 0, 0, 0]).astype(np.float32)
         # self.action_high = np.array([6, 4e-3, 1e-2, 2e-3, 3e3, 600, 1200]).astype(np.float32)
         self.action_high = np.array([6, 4e-3, 1e-2, 2e-3]).astype(np.float32)
-        self.action_high *= 2
+        # self.action_high *= 2
         self.action_low = -self.action_high
 
         self.action_space = spaces.Box(
@@ -95,6 +98,9 @@ class ASUEnv(gym.Env):
 
         '''
         ================= observation space ================ 
+        e | 
+        u | 
+
         '''
         if self.obs_dict:
             self.observation_space = spaces.Dict(
@@ -110,23 +116,15 @@ class ASUEnv(gym.Env):
             # self.obs_low = np.array([-np.inf, -1]).astype(np.float32)
             # self.obs_high = np.array([np.inf, 1]).astype(np.float32)
             self.observation_space = spaces.Box(
-                # self.obs_low, self.obs_high,
                 -np.inf, np.inf,
-                shape=(2*self.ny+2*self.nu, self.back)
+                shape=(self.ny+self.nu, self.back)
             )
 
         self.state = self.assign_init_state() 
 
     def assign_init_state(self):
-        # goal = np.repeat(self.goal, self.back, axis=1)
-        y = np.repeat(np.ones((7, 1)), self.back, axis=1)
-        error = np.repeat(np.ones((7, 1)), self.back, axis=1)
-        # error = np.repeat(self.target-1, self.back, axis=1)
-        # du = np.zeros((self.nu, self.back))
-        # u = np.repeat(np.zeros((self.nu, 1)), self.back, axis=1)
-
-        # y = np.repeat(self.y0, self.back, axis=1)
-        # error = np.repeat(self.goal-self.y0, self.back, axis=1)
+        error = np.repeat(self.e0, self.back, axis=1)
+        y = np.repeat(self.e0, self.back, axis=1)
         du = np.zeros((self.nu, self.back))
         u = np.repeat(np.zeros((self.nu, 1)), self.back, axis=1)
 
@@ -142,9 +140,9 @@ class ASUEnv(gym.Env):
         else:
             init_state = np.vstack(
                 (
-                    y,
+                    # y,
                     error,
-                    du,
+                    # du,
                     u,
                 )
             )
@@ -155,34 +153,39 @@ class ASUEnv(gym.Env):
             obs_info = [obs[key] for key in obs.keys()]
             return tuple(obs_info)
         else:
-            y_ = obs[:self.ny, :]
-            error_ = obs[self.ny:2*self.ny, :]
-            du_ = obs[-2*self.nu:-self.nu, :]
+            # y_ = obs[:self.ny, :]
+            # error_ = obs[self.ny:2*self.ny, :]
+            # du_ = obs[-2*self.nu:-self.nu, :]
+            # u_ = obs[-self.nu:, :]
+            error_ = obs[:self.ny, :]
             u_ = obs[-self.nu:, :]
-            return tuple([y_, error_, du_, u_]) 
+            return tuple([error_, u_])
+            # return tuple([y_, error_, du_, u_]) 
     
     def update_state(self, info:tuple):
         '''
         tuple format like (current_error, action)
         '''
-        y_, error_, du_, u_ = self.get_obs_info(self.state)
-        current_y, current_error, current_du, current_u = copy.deepcopy(info)
+        # y_, error_, du_, u_ = self.get_obs_info(self.state)
+        error_, u_ = self.get_obs_info(self.state)
+        current_error, current_u = info
+        # current_y, current_error, current_du, current_u = copy.deepcopy(info)
         current_u /= self.u0
 
         '''
         hstack current state value
         '''
-        y_ = np.hstack((
-            y_[:, 1:], current_y,
-        ))
+        # y_ = np.hstack((
+        #     y_[:, 1:], current_y,
+        # ))
 
         error_ = np.hstack((
             error_[:, 1:], current_error
         ))
         
-        du_ = np.hstack((
-            du_[:, 1:], current_du
-        ))        
+        # du_ = np.hstack((
+        #     du_[:, 1:], current_du
+        # ))        
         
         u_ = np.hstack((
             u_[:, 1:], current_u
@@ -193,20 +196,22 @@ class ASUEnv(gym.Env):
         '''
         if self.obs_dict:
             self.state = {
-                "y": y_,
+                # "y": y_,
                 "error": error_,
-                "du": du_,
+                # "du": du_,
                 "u": u_,
             }
         else:
             self.state = np.vstack((
-                y_, error_, du_, u_,
+                # y_, error_, du_, u_,
+                error_, u_,
             ))
     
     def rescale_action(self, action):
-        action = action.squeeze() # change to vector 
+        action = action.squeeze() # change to vector
+        res = action * self.action_high 
         # res = self.action_low + (self.action_high - self.action_low) * ((action + 1) / 2)
-        res = (action + 1) / 2 * self.action_high
+        # res = (action + 1) / 2 * self.action_high
         # res = self.action_low.reshape(-1, 1) + action * ((self.action_high - self.action_low).reshape(-1, 1) / (self.num_divide-1).reshape(-1, 1))
         return res
     
@@ -306,8 +311,8 @@ class ASUEnv(gym.Env):
         action = action.reshape(-1, 1)
         # action = np.clip(action, np.zeros((self.nu, 1)), self.action_high.reshape(-1, 1))
         self.num_step += 1
-        self.du = self.rescale_action(action).reshape(-1, 1)
-        # self.du = action
+        # self.du = self.rescale_action(action).reshape(-1, 1)
+        self.du = action
         self.u += self.du
         self.dusim[self.num_step, :] = self.du.squeeze() 
         self.usim[self.num_step, :] = self.u.squeeze() 
@@ -322,9 +327,12 @@ class ASUEnv(gym.Env):
         # self.ysim[self.num_step, :] = tmp_y.squeeze() 
         self.calculation_output()
 
-        current_y = self.ysim[self.num_step, :].reshape(-1, 1) / self.y0
-        current_error = (self.goal - self.ysim[self.num_step, :].reshape(-1, 1)) / self.e0
-        self.update_state((current_y, current_error, action, self.u))
+        # current_y = self.ysim[self.num_step, :].reshape(-1, 1) / self.y0
+        # current_error = (self.goal - self.ysim[self.num_step, :].reshape(-1, 1)) / self.e0
+        # self.update_state((current_y, current_error, action, self.u))
+        current_y = self.ysim[self.num_step, :].reshape(-1, 1)
+        current_error = (self.goal - current_y) / self.e0_real
+        self.update_state((current_error, action))
 
         '''
         Reward part & 
@@ -337,7 +345,18 @@ class ASUEnv(gym.Env):
         if self.num_step == self.Tsim:
             # self.render_plot()
             truncated = True
-        reward -= np.sum(current_error**2)
+
+        # reward -= np.sum(current_error**2)
+        reward -= (np.sum(current_error[:1]**2))
+
+        # exponential reward
+        # threshold = np.exp(-self.num_step / 200)
+        # for i in range(self.ny):
+        #     if abs(current_error[i]) < threshold:
+        #         reward += abs(abs(current_error[i]) - threshold) / threshold
+        #     else:
+        #         reward -= abs(abs(current_error[i]) - threshold) / threshold
+
 
         self.total_reward[-1] += reward 
 
@@ -388,7 +407,35 @@ if __name__ == "__main__":
     # env = VecNormalize(env, norm_obs=False)
     eval_env = ASUEnv(
         {
-            'Tsim': 400,
+            'Tsim': 3000,
             'obs_dict': False
         }
     )
+
+    import stable_baselines3 as sb3
+    from stable_baselines3 import PPO, DDPG, SAC
+    from stable_baselines3.common.monitor import Monitor
+
+    agent = PPO(
+        policy='MlpPolicy',
+        env=eval_env,
+        verbose=1,   
+    )
+    # agent = DDPG(
+    #     policy='MlpPolicy',
+    #     env=eval_env,
+    #     verbose=1,
+    #     batch_size=512,
+    #     buffer_size=1000000,
+    #     learning_starts=10000,
+    # )
+    # agent = SAC(
+    #     policy='MlpPolicy',
+    #     env=eval_env,
+    #     verbose=1,
+    #     batch_size=512,
+    #     buffer_size=100000,
+    #     learning_starts=5000,
+    # )
+
+    agent.learn(total_timesteps=2000000)

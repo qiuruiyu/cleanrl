@@ -20,6 +20,7 @@ from torch.utils.tensorboard import SummaryWriter
 from envs.asu.env_copy import make_asu_env
 from envs.parafoil.simple_env import make_parafoil_env
 from envs.shell.shell import make_shell_env
+from rl_plotter.logger import Logger
 
 # os.environ['WANDB_MODE'] = 'offline'
 
@@ -42,12 +43,14 @@ def parse_args():
         help="the entity (team) of wandb's project")
     parser.add_argument("--capture-video", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
         help="whether to capture videos of the agent performances (check out `videos` folder)")
-    parser.add_argument('--save-model', type=bool, default=True,
+    parser.add_argument('--save-model', type=bool, default=False,
         help="whether to save model during the training process")
-    parser.add_argument('--save-best-model', type=bool, default=True,
+    parser.add_argument('--save-best-model', type=bool, default=False,
         help="whether to save best model during the training process")
     parser.add_argument('--save-interval', type=int, default=50,
         help="save model weights every n num_update")
+    parser.add_argument('--plot-logger', type=bool, default=False,
+        help="whether to use logger to plot the training process")
 
 
     # Algorithm specific arguments
@@ -102,10 +105,10 @@ def make_env(env_id, idx, capture_video, run_name, gamma, args):
         #     env = gym.make(env_id, render_mode="rgb_array")
         # else:
         #     env = gym.make(env_id)
-        # q, r = args.qr
-        # env = make_shell_env(q, r)
+        q, r = args.qr
+        env = make_shell_env(q, r)
         # env = make_asu_env(idx)
-        env = make_parafoil_env() 
+        # env = make_parafoil_env() 
         # env = gym.make('Pendulum-v1')
         env = gym.wrappers.FlattenObservation(env)  # deal with dm_control's Dict observation space
         # env = gym.wrappers.NormalizeObservation(env)
@@ -133,19 +136,20 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
 class Agent(nn.Module):
     def __init__(self, envs):
         super().__init__()
+        a = 64
         self.critic = nn.Sequential(
-            layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), 64)),
+            layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), a)),
             nn.Tanh(),
-            layer_init(nn.Linear(64, 64)),
+            layer_init(nn.Linear(a, a)),
             nn.Tanh(),
-            layer_init(nn.Linear(64, 1), std=1.0),
+            layer_init(nn.Linear(a, 1), std=1.0),
         )
         self.actor_mean = nn.Sequential(
-            layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), 64)),
+            layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), a)),
             nn.Tanh(),
-            layer_init(nn.Linear(64, 64)),
+            layer_init(nn.Linear(a, a)),
             nn.Tanh(),
-            layer_init(nn.Linear(64, np.prod(envs.single_action_space.shape)), std=0.01),
+            layer_init(nn.Linear(a, np.prod(envs.single_action_space.shape)), std=0.01),
         )
         self.actor_logstd = nn.Parameter(torch.zeros(1, np.prod(envs.single_action_space.shape)))
 
@@ -168,12 +172,19 @@ if __name__ == "__main__":
     args = parse_args()
     q, r = args.qr
     print('Q, R', q, r)
-    # run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
-    # run_name = f"{args.env_id}_q_{q}_r_{r}_{args.seed}_{int(time.time())}"
-    run_name = f"{args.env_id}_{args.seed}_{int(time.time())}"
+    run_name = f"{args.env_id}_q_{q}_r_{r}_{args.seed}_{int(time.time())}"
+    # run_name = f"{args.env_id}_{args.seed}_{int(time.time())}"
     if args.save_model or args.save_best_model:
         model_path = f'./models/{run_name}'
-    os.makedirs(model_path, exist_ok=True)
+        os.makedirs(model_path, exist_ok=True)
+
+    if args.plot_logger:
+        logger = Logger(
+            log_dir="./models/",
+            exp_name=args.exp_name,
+            env_name=f"{args.env_id}_q_{q}_r_{r}",
+            seed=1234,
+        )
 
     if args.track:
         import wandb
@@ -265,6 +276,12 @@ if __name__ == "__main__":
                 print(f"global_step={global_step}, episodic_return={info['episode']['r']}")
                 writer.add_scalar("charts/episodic_return", info["episode"]["r"], global_step)
                 writer.add_scalar("charts/episodic_length", info["episode"]["l"], global_step)
+                
+                if args.plot_logger:
+                    logger.update(
+                        score=[info["episode"]["r"]],
+                        total_steps=global_step,
+                        )
 
                 if args.save_best_model:
                     if info['episode']['r'] > best_rewards:
