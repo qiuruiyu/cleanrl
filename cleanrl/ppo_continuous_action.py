@@ -172,18 +172,29 @@ if __name__ == "__main__":
     args = parse_args()
     q, r = args.qr
     print('Q, R', q, r)
-    run_name = f"{args.env_id}_q_{q}_r_{r}_{args.seed}_{int(time.time())}"
+    # run_name = f"{args.env_id}_q_{q}_r_{r}_{args.seed}_{int(time.time())}"
     # run_name = f"{args.env_id}_{args.seed}_{int(time.time())}"
-    if args.save_model or args.save_best_model:
-        model_path = f'./models/{run_name}'
-        os.makedirs(model_path, exist_ok=True)
+    exp_num = 0 
+    run_name = f"{args.exp_name}_{args.env_id}_zeta_{r/q:.2f}-"
+    while True:
+        if os.path.exists(f"{run_name}-{str(exp_num)}/"):
+            exp_num += 1
+        else:
+            # os.makedirs(f"{run_name}-{str(exp_num)}/")
+            run_name = run_name + str(exp_num)
+            model_path = f'./models/{run_name}'
+            break 
+
+    # if args.save_model or args.save_best_model:
+    #     model_path = f'./models/{run_name}'
+    #     os.makedirs(model_path, exist_ok=True)
 
     if args.plot_logger:
         logger = Logger(
             log_dir="./models/",
             exp_name=args.exp_name,
-            env_name=f"{args.env_id}_q_{q}_r_{r}",
-            seed=1234,
+            env_name=f"{args.env_id}_zeta_{r/q:.2f}",
+            seed=args.seed,
         )
 
     if args.track:

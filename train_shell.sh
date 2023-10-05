@@ -2,10 +2,7 @@
 # source /Users/joseph/miniforge3/etc/profile.d/conda.sh 
 # conda activate ppo 
 
-python ./cleanrl/ppo_continuous_action.py --env-id ASU-v0 --num-envs 10 --total-timesteps 20000000 --track True --cuda False 
-
-# python ./cleanrl/ppo_continuous_action.py --env-id Shell-v0 --qr 1 1 --num-envs 6 --total-timesteps 2000000  --track True --cuda False
-
+python ./cleanrl/ppo_continuous_action.py --exp-name PPO --seed 1234 --cuda False --track False --save-model True --save-best-model True --save-interval 100 --plot-logger True --env-id Shell2 --qr 1 1 --num-envs 10 --total-timesteps 1000000 --torch-deterministic False
 # python ./cleanrl/ppo_continuous_action.py --env-id Shell-v0 --qr 1 5 --num-envs 6 --total-timesteps 2000000 --track True --cuda False  
 
 # python ./cleanrl/ppo_continuous_action.py --env-id Shell-v0 --qr 1 10 --num-envs 6 --total-timesteps 2000000 --track True --cuda False 
