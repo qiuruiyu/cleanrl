@@ -177,7 +177,7 @@ if __name__ == "__main__":
     exp_num = 0 
     run_name = f"{args.exp_name}_{args.env_id}-"
     while True:
-        if os.path.exists(f"{run_name}{str(exp_num)}/"):
+        if os.path.exists(f"./runs/{run_name}{str(exp_num)}"):
             exp_num += 1
         else:
             # os.makedirs(f"{run_name}-{str(exp_num)}/")

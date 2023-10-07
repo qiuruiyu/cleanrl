@@ -21,8 +21,8 @@ class ASUEnv(gym.Env):
         """
         self.Tsim = env_config['Tsim'] if 'Tsim' in env_config.keys() else 2500
         self.obs_dict = env_config['obs_dict'] if 'obs_dict' in env_config.keys() else False
-        self.nu = 4
-        self.ny = 4
+        self.nu = 3
+        self.ny = 3
         self.back = 20
         # self.back = self.Tsim
         self.total_reward = []
@@ -40,9 +40,9 @@ class ASUEnv(gym.Env):
             17940,    # 氧气量
             37672,    # 氮气量
             1.434,    # 污氮气含量
-            # 99.7648,  # 氧气纯度 
-            # 0.317,    # 氮气纯度
-            # 9.55,     # AI701 * 
+            99.7648,  # 氧气纯度 
+            0.317,    # 氮气纯度
+            9.55,     # AI701 * 
         ]).reshape(-1, 1)
 
         self.goal = np.array([
@@ -50,11 +50,15 @@ class ASUEnv(gym.Env):
             19000,
             39976, 
             1.57, 
-            # 99.7332, 
-            # 0.3508, 
-            # 9.3461
+            99.7332, 
+            0.3508, 
+            9.3461
         ]).reshape(-1, 1)
         
+        self.u0 = self.u0[:self.nu].reshape(-1, 1)
+        self.y0 = self.y0[:self.ny].reshape(-1, 1)
+        self.goal = self.goal[:self.ny].reshape(-1, 1)
+
         self.e0_real = self.goal - self.y0  # init real error 
         self.e0 = (self.goal - self.y0) / self.e0_real  # init scaled error 
         
@@ -76,8 +80,13 @@ class ASUEnv(gym.Env):
         |  6  | 4e-3 | 1e-2 | 2e-3 | 3e3 |  600  |  1200 |
         ==================================================
         '''
-        self.action_high = np.array([6, 4e-3, 1e-2, 2e-3]).astype(np.float32) * 3
-        # self.action_high = np.array([6, 4e-3, 1e-2]).astype(np.float32) * 3
+        if self.nu == 4:
+            self.action_high = np.array([6, 4e-3, 1e-2, 2e-3]).astype(np.float32) * 3
+        elif self.nu == 3:
+            self.action_high = np.array([6, 4e-3, 1e-2]).astype(np.float32) * 3
+        else:
+            raise NotImplementedError
+        
         self.action_low = -self.action_high
 
         self.action_space = spaces.Box(
@@ -87,9 +96,9 @@ class ASUEnv(gym.Env):
 
         '''
         ================= observation space ================ 
-        e | 
-        u | 
-
+        | e | 
+        | u | 
+        ====================================================
         '''
         if self.obs_dict:
             self.observation_space = spaces.Dict(
@@ -112,13 +121,12 @@ class ASUEnv(gym.Env):
         du = np.zeros((self.nu, self.back))
         u = np.repeat(np.ones((self.nu, 1)), self.back, axis=1)
 
-
         if self.obs_dict:
             init_state = {
                 "error": error,
                 "u": u,
             }
-        else:
+        else:  # array like 
             init_state = np.vstack(
                 (
                     error,
@@ -176,8 +184,6 @@ class ASUEnv(gym.Env):
         return res
     
     def calculation_output(self):
-        # y = y.reshape(-1, 1)
-
         # y1 - y3
         delta = (self.usim[1:self.num_step+1, :3] - self.usim[:self.num_step, :3]).T
         step_cut = np.vstack(
@@ -192,68 +198,73 @@ class ASUEnv(gym.Env):
         self.ysim[self.num_step, :3] = self.ysim[0, :3] + change.reshape(1, -1)
         
         # delta is same for all y later 
-        delta = np.vstack(
-            (
-                (self.usim[1:self.num_step+1, 3] - self.usim[:self.num_step, 3]).reshape(1, -1),
-                (self.ysim[1:self.num_step+1, 0] - self.ysim[:self.num_step, 0]).reshape(1, -1),
-                (self.ysim[1:self.num_step+1, 1] - self.ysim[:self.num_step, 1]).reshape(1, -1),
-                (self.ysim[1:self.num_step+1, 2] - self.ysim[:self.num_step, 2]).reshape(1, -1),
+        if self.ny >= 4:
+            delta = np.vstack(
+                (
+                    (self.usim[1:self.num_step+1, 3] - self.usim[:self.num_step, 3]).reshape(1, -1),
+                    (self.ysim[1:self.num_step+1, 0] - self.ysim[:self.num_step, 0]).reshape(1, -1),
+                    (self.ysim[1:self.num_step+1, 1] - self.ysim[:self.num_step, 1]).reshape(1, -1),
+                    (self.ysim[1:self.num_step+1, 2] - self.ysim[:self.num_step, 2]).reshape(1, -1),
+                )
             )
-        )
 
-        # y4 (AI5)
-        step_cut = np.vstack(
-            (
-                np.flipud(self.S[:self.num_step, 3, 3]).reshape(1, -1),
-                np.flipud(self.S[:self.num_step, 3, 4]).reshape(1, -1),
-                np.flipud(self.S[:self.num_step, 3, 5]).reshape(1, -1),
-                np.flipud(self.S[:self.num_step, 3, 6]).reshape(1, -1),
+        if self.ny >= 4:
+            # y4 (AI5)
+            step_cut = np.vstack(
+                (
+                    np.flipud(self.S[:self.num_step, 3, 3]).reshape(1, -1),
+                    np.flipud(self.S[:self.num_step, 3, 4]).reshape(1, -1),
+                    np.flipud(self.S[:self.num_step, 3, 5]).reshape(1, -1),
+                    np.flipud(self.S[:self.num_step, 3, 6]).reshape(1, -1),
+                )
             )
-        )
-        change = np.sum(delta * step_cut)
-        # update 
-        self.ysim[self.num_step, 3] = self.ysim[0, 3] + change
+            change = np.sum(delta * step_cut)
+            # update 
+            self.ysim[self.num_step, 3] = self.ysim[0, 3] + change
 
-        # y5 (AIAS102)
-        # step_cut = np.vstack(
-        #     (
-        #         np.flipud(self.S[:self.num_step, 4, 3]).reshape(1, -1),
-        #         np.flipud(self.S[:self.num_step, 4, 4]).reshape(1, -1),
-        #         np.flipud(self.S[:self.num_step, 4, 5]).reshape(1, -1),
-        #         np.flipud(self.S[:self.num_step, 4, 6]).reshape(1, -1),
-        #     )
-        # )
-        # change = np.sum(delta * step_cut)
-        # # update 
-        # self.ysim[self.num_step, 4] = self.ysim[0, 4] + change
-        # if self.ysim[self.num_step, 4] >= 99.98:
-        #     self.ysim[self.num_step, 4] = 99.98
+        if self.ny >= 5:
+            # y5 (AIAS102)
+            step_cut = np.vstack(
+                (
+                    np.flipud(self.S[:self.num_step, 4, 3]).reshape(1, -1),
+                    np.flipud(self.S[:self.num_step, 4, 4]).reshape(1, -1),
+                    np.flipud(self.S[:self.num_step, 4, 5]).reshape(1, -1),
+                    np.flipud(self.S[:self.num_step, 4, 6]).reshape(1, -1),
+                )
+            )
+            change = np.sum(delta * step_cut)
+            # update 
+            self.ysim[self.num_step, 4] = self.ysim[0, 4] + change
+            if self.ysim[self.num_step, 4] >= 99.98:
+                self.ysim[self.num_step, 4] = 99.98
 
-        # # y6 (ASAS103)
-        # step_cut = np.vstack(
-        #     (
-        #         np.flipud(self.S[:self.num_step, 5, 3]).reshape(1, -1),
-        #         np.flipud(self.S[:self.num_step, 5, 4]).reshape(1, -1),
-        #         np.flipud(self.S[:self.num_step, 5, 5]).reshape(1, -1),
-        #         np.flipud(self.S[:self.num_step, 5, 6]).reshape(1, -1),
-        #     )
-        # )
-        # change = np.sum(delta * step_cut)
-        # # update 
-        # self.ysim[self.num_step, 5] = self.ysim[0, 5] + change
+        if self.ny >= 6:
+            # y6 (ASAS103)
+            step_cut = np.vstack(
+                (
+                    np.flipud(self.S[:self.num_step, 5, 3]).reshape(1, -1),
+                    np.flipud(self.S[:self.num_step, 5, 4]).reshape(1, -1),
+                    np.flipud(self.S[:self.num_step, 5, 5]).reshape(1, -1),
+                    np.flipud(self.S[:self.num_step, 5, 6]).reshape(1, -1),
+                )
+            )
+            change = np.sum(delta * step_cut)
+            # update 
+            self.ysim[self.num_step, 5] = self.ysim[0, 5] + change
 
-        # # y7 (AI701)
-        # step_cut = np.vstack(
-        #     (
-        #         np.flipud(self.S[:self.num_step, 6, 3]).reshape(1, -1),
-        #         np.flipud(self.S[:self.num_step, 6, 4]).reshape(1, -1),
-        #         np.flipud(self.S[:self.num_step, 6, 5]).reshape(1, -1),
-        #         np.flipud(self.S[:self.num_step, 6, 6]).reshape(1, -1),
-        #     )
-        # )
-        # change = np.sum(delta * step_cut)
-        # # update 
-        # self.ysim[self.num_step, 6] = self.ysim[0, 6] + change 
+        if self.ny >= 7:
+            # y7 (AI701)
+            step_cut = np.vstack(
+                (
+                    np.flipud(self.S[:self.num_step, 6, 3]).reshape(1, -1),
+                    np.flipud(self.S[:self.num_step, 6, 4]).reshape(1, -1),
+                    np.flipud(self.S[:self.num_step, 6, 5]).reshape(1, -1),
+                    np.flipud(self.S[:self.num_step, 6, 6]).reshape(1, -1),
+                )
+            )
+            change = np.sum(delta * step_cut)
+            # update 
+            self.ysim[self.num_step, 6] = self.ysim[0, 6] + change 
 
     def render_plot(self):
         t = np.array(range(self.Tsim))
@@ -261,13 +272,18 @@ class ASUEnv(gym.Env):
         # ny | nu 
         for i in range(self.ny):
             axs[i, 0].plot(t, self.ysim[:-1, i], 'b-', label='y{}'.format(i+1))
-            axs[i, 0].plot([0, t[-1]], [self.goal[i], self.goal[i]], 'r--', label='goal')
-            plt.grid() 
+            if i < 3:
+                axs[i, 0].plot([0, t[-1]], [self.goal[i], self.goal[i]], 'r--', label='goal')
+            else:
+                axs[i, 0].plot([0, t[-1]], [self.goal[i]-0.6*(self.e0_real[i]), self.goal[i]-0.6*(self.e0_real[i])], 'r--', label='goal')
+                axs[i, 0].plot([0, t[-1]], [self.goal[i]-0.8*(self.e0_real[i]), self.goal[i]-0.8*(self.e0_real[i])], 'r--', label='goal')
+            axs[i, 0].grid(True)
+            axs[i, 0].legend()
         for i in range(self.nu):
             axs[i, 1].plot(t, self.usim[:-1, i], 'b-', label='u{}'.format(i+1))
-            plt.grid()
-        # plt.show()
-        plt.savefig('runs/figs/fig_{}_{:.2f}.png'.format(len(self.total_reward), self.total_reward[-1]))
+            axs[i, 1].grid(True)
+            axs[i, 1].legend()
+        plt.savefig('runs/figs/fig_{}_{}.png'.format(len(self.total_reward), int(self.total_reward[-1].item())))
 
     def step(self, action):
         """
@@ -275,7 +291,6 @@ class ASUEnv(gym.Env):
         :return: tuple(observation, reward, terminated, truncated, info)
         """
         action = action.reshape(-1, 1)
-        # action = np.array([1, 1, 1, 1]).reshape(-1, 1)
         self.num_step += 1
         self.du = self.rescale_action(action).reshape(-1, 1)
         # self.du = action
@@ -283,15 +298,6 @@ class ASUEnv(gym.Env):
         self.dusim[self.num_step, :] = self.du.squeeze() 
         self.usim[self.num_step, :] = self.u.squeeze() 
 
-        '''
-        Optimized NumPy operation, faster x1.25
-        '''
-        # TODO: How to translate this part? 
-        # self.yk = self.M.dot(self.yk)
-        # self.yk += np.matmul(self.S, self.du).squeeze()
-        # tmp_y = self.yk[0, :].reshape(-1, 1)
-        # tmp_y *= 10
-        # self.ysim[self.num_step, :] = tmp_y.squeeze() 
         self.calculation_output()
 
         current_y = self.ysim[self.num_step, :].reshape(-1, 1)
@@ -308,17 +314,28 @@ class ASUEnv(gym.Env):
 
         if self.num_step == self.Tsim:
             truncated = True
-            if len(self.total_reward) % 10 == 1:
+            if len(self.total_reward) % 50 == 1:
                 os.makedirs('runs/figs', exist_ok=True)
-            if len(self.total_reward) % 10 == 1:
                 self.render_plot()
 
-        reward -= (np.sum(current_error**2))
+        # mse error of 3 deterministic vars in y 
+        reward -= (np.sum(current_error[:3]**2))
+
+        # error for keeping y4 in a given range and keep as steady as possible 
+        # given_range = [0.6, 0.8]
+        # for i in range(3, self.ny):
+        #     if current_error[i] > given_range[1] or current_error[i] < given_range[0]:
+        #         abs_e = np.max([np.abs(current_error[i] - 0.6), np.abs(current_error[i] - 0.8)])
+        #         reward -= abs_e * 2 
+        # for keeping it steady 
+            # reward -= np.var(self.ysim[:self.num_step, i]) * 2
 
         # prevent over shooting
         for i in range(3):  # only for the 3 vars ahead
             if self.e0[i] * current_error[i] < 0:  # over shooting 
-                reward -= np.abs(current_error[i]) * 100
+                reward -= np.abs(current_error[i]) * 10
+
+        # reward /= 3 
 
         self.total_reward[-1] += reward 
 
@@ -342,8 +359,7 @@ class ASUEnv(gym.Env):
         self.ysim = np.vstack((
             self.y0.copy().T,
             np.zeros((self.Tsim, self.ny))
-        ))  
-        
+        ))         
 
         self.state = self.assign_init_state()
 
@@ -372,35 +388,38 @@ if __name__ == "__main__":
     )
 
     import stable_baselines3 as sb3
-    from stable_baselines3 import PPO, DDPG, SAC
+    from stable_baselines3 import PPO, DDPG, SAC, TD3
     from stable_baselines3.common.monitor import Monitor
 
-    # agent = PPO(
-    #     policy='MlpPolicy',
-    #     env=eval_env,
-    #     verbose=1,
-    #     device='cpu',
-    #     tensorboard_log='./runs/',
-    # )
-
-    # agent = DDPG(
-    #     policy='MlpPolicy',
-    #     env=eval_env,
-    #     verbose=1,
-    #     batch_size=512,
-    #     buffer_size=1000000,
-    #     learning_starts=10000,
-    # )
-    agent = SAC(
+    agent = PPO(
         policy='MlpPolicy',
         env=eval_env,
         verbose=1,
-        batch_size=512,
-        buffer_size=200000,
-        learning_starts=5000,
-        tensorboard_log='./runs/',
         device='cpu',
+        tensorboard_log='./runs/',
     )
+
+    # agent = TD3(
+    #     policy='MlpPolicy',
+    #     env=eval_env,
+    #     verbose=1,
+    #     batch_size=1024,
+    #     buffer_size=100000,
+    #     learning_starts=20000,
+    #     tensorboard_log='./runs/',
+    # )
+
+    # agent = SAC(
+    #     policy='MlpPolicy',
+    #     env=eval_env,
+    #     verbose=1,
+    #     # train_freq=5,
+    #     batch_size=256,
+    #     buffer_size=100000,
+    #     learning_starts=1000,
+    #     tensorboard_log='./runs/',
+    #     device='cpu',
+    # )
 
     agent.learn(total_timesteps=6000000)
     agent.save('runs')
