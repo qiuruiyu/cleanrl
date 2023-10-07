@@ -45,7 +45,7 @@ def parse_args():
         help="whether to capture videos of the agent performances (check out `videos` folder)")
     parser.add_argument('--save-model', type=bool, default=False,
         help="whether to save model during the training process")
-    parser.add_argument('--save-best-model', type=bool, default=False,
+    parser.add_argument('--save-best-model', type=bool, default=True,
         help="whether to save best model during the training process")
     parser.add_argument('--save-interval', type=int, default=50,
         help="save model weights every n num_update")
@@ -105,9 +105,9 @@ def make_env(env_id, idx, capture_video, run_name, gamma, args):
         #     env = gym.make(env_id, render_mode="rgb_array")
         # else:
         #     env = gym.make(env_id)
-        q, r = args.qr
-        env = make_shell_env(q, r)
-        # env = make_asu_env(idx)
+        # q, r = args.qr
+        # env = make_shell_env(q, r)
+        env = make_asu_env(idx)
         # env = make_parafoil_env() 
         # env = gym.make('Pendulum-v1')
         env = gym.wrappers.FlattenObservation(env)  # deal with dm_control's Dict observation space
@@ -175,9 +175,9 @@ if __name__ == "__main__":
     # run_name = f"{args.env_id}_q_{q}_r_{r}_{args.seed}_{int(time.time())}"
     # run_name = f"{args.env_id}_{args.seed}_{int(time.time())}"
     exp_num = 0 
-    run_name = f"{args.exp_name}_{args.env_id}_zeta_{r/q:.2f}-"
+    run_name = f"{args.exp_name}_{args.env_id}-"
     while True:
-        if os.path.exists(f"{run_name}-{str(exp_num)}/"):
+        if os.path.exists(f"{run_name}{str(exp_num)}/"):
             exp_num += 1
         else:
             # os.makedirs(f"{run_name}-{str(exp_num)}/")
@@ -185,9 +185,9 @@ if __name__ == "__main__":
             model_path = f'./models/{run_name}'
             break 
 
-    # if args.save_model or args.save_best_model:
-    #     model_path = f'./models/{run_name}'
-    #     os.makedirs(model_path, exist_ok=True)
+    if args.save_model or args.save_best_model:
+        model_path = f'./models/{run_name}'
+        os.makedirs(model_path, exist_ok=True)
 
     if args.plot_logger:
         logger = Logger(
