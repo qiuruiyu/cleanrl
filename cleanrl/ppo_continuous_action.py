@@ -191,9 +191,10 @@ if __name__ == "__main__":
 
     if args.plot_logger:
         logger = Logger(
-            log_dir="./models/",
+            log_dir="./runs/",
             exp_name=args.exp_name,
-            env_name=f"{args.env_id}_zeta_{r/q:.2f}",
+            # env_name=f"{args.env_id}_zeta_{r/q:.2f}",
+            env_name=f"{args.env_id}",
             seed=args.seed,
         )
 

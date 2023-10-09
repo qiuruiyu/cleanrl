@@ -2,8 +2,11 @@
 import argparse
 import os
 import random
+import sys 
 import time
 from distutils.util import strtobool
+
+sys.path.append('./')
 
 import gymnasium as gym
 import numpy as np
@@ -12,6 +15,11 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.distributions.normal import Normal
 from torch.utils.tensorboard import SummaryWriter
+
+from envs.asu.env_copy import make_asu_env
+from envs.parafoil.simple_env import make_parafoil_env
+from envs.shell.shell import make_shell_env
+from rl_plotter.logger import Logger
 
 
 def parse_args():
@@ -80,20 +88,21 @@ def parse_args():
 
 def make_env(env_id, idx, capture_video, run_name, gamma):
     def thunk():
-        if capture_video:
-            env = gym.make(env_id, render_mode="rgb_array")
-        else:
-            env = gym.make(env_id)
+        env = make_asu_env(idx)
+        # if capture_video:
+        #     env = gym.make(env_id, render_mode="rgb_array")
+        # else:
+        #     env = gym.make(env_id)
         env = gym.wrappers.FlattenObservation(env)  # deal with dm_control's Dict observation space
         env = gym.wrappers.RecordEpisodeStatistics(env)
         if capture_video:
             if idx == 0:
                 env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
         env = gym.wrappers.ClipAction(env)
-        env = gym.wrappers.NormalizeObservation(env)
-        env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10))
-        env = gym.wrappers.NormalizeReward(env, gamma=gamma)
-        env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
+        # env = gym.wrappers.NormalizeObservation(env)
+        # env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10))
+        # env = gym.wrappers.NormalizeReward(env, gamma=gamma)
+        # env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
         return env
 
     return thunk

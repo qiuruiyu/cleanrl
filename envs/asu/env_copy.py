@@ -23,7 +23,7 @@ class ASUEnv(gym.Env):
         self.obs_dict = env_config['obs_dict'] if 'obs_dict' in env_config.keys() else False
         self.nu = 3
         self.ny = 3
-        self.back = 20
+        self.back = 1
         # self.back = self.Tsim
         self.total_reward = []
         self.u0 = np.array([
@@ -63,6 +63,8 @@ class ASUEnv(gym.Env):
         self.e0 = (self.goal - self.y0) / self.e0_real  # init scaled error 
         
         self.target = np.zeros((self.ny, 1))
+        self.epsilon = 1e-2   # relaxable error
+        self.relaxed_target = self.epsilon * np.repeat(-self.epsilon * np.ones((self.ny, 1)) * (self.e0 > 0), self.back, axis=1)
         
         # weight parameters 
         self.Q = np.ones((1, self.ny))
@@ -110,7 +112,7 @@ class ASUEnv(gym.Env):
         else: 
             self.observation_space = spaces.Box(
                 -np.inf, np.inf,
-                shape=(self.ny+self.nu, self.back)
+                shape=(2*self.ny+self.nu, self.back)
             )
 
         self.state = self.assign_init_state() 
@@ -129,6 +131,7 @@ class ASUEnv(gym.Env):
         else:  # array like 
             init_state = np.vstack(
                 (
+                    self.relaxed_target, 
                     error,
                     u,
                 )
@@ -140,7 +143,7 @@ class ASUEnv(gym.Env):
             obs_info = [obs[key] for key in obs.keys()]
             return tuple(obs_info)
         else:
-            error_ = obs[:self.ny, :]
+            error_ = obs[self.ny:2*self.ny, :]
             u_ = obs[-self.nu:, :]
             return tuple([error_, u_])
     
@@ -174,7 +177,7 @@ class ASUEnv(gym.Env):
             }
         else:
             self.state = np.vstack((
-                error_, u_,
+                self.relaxed_target, error_, u_,
             ))
     
     def rescale_action(self, action):
@@ -319,7 +322,9 @@ class ASUEnv(gym.Env):
                 self.render_plot()
 
         # mse error of 3 deterministic vars in y 
-        reward -= (np.sum(current_error[:3]**2))
+        reward -= np.sum((current_error[:3] - self.epsilon)**2)
+        # consumption of 3 vars in u, action is [-1, 1]
+        reward -= np.sum(action[:3]**2) * 0.01
 
         # error for keeping y4 in a given range and keep as steady as possible 
         # given_range = [0.6, 0.8]
@@ -333,7 +338,8 @@ class ASUEnv(gym.Env):
         # prevent over shooting
         for i in range(3):  # only for the 3 vars ahead
             if self.e0[i] * current_error[i] < 0:  # over shooting 
-                reward -= np.abs(current_error[i]) * 10
+                reward -= np.log(self.num_step) * np.abs(current_error[i])
+                
 
         # reward /= 3 
 
@@ -368,7 +374,7 @@ class ASUEnv(gym.Env):
 def make_asu_env(rank=0, seed=0):
     env = ASUEnv(
         {
-            'Tsim': 1000,
+            'Tsim': 1500,
             'obs_dict': False
         }
     )
@@ -382,7 +388,7 @@ if __name__ == "__main__":
     # env = VecNormalize(env, norm_obs=False)
     eval_env = ASUEnv(
         {
-            'Tsim': 1000,
+            'Tsim': 1500,
             'obs_dict': False
         }
     )
@@ -413,7 +419,7 @@ if __name__ == "__main__":
     #     policy='MlpPolicy',
     #     env=eval_env,
     #     verbose=1,
-    #     # train_freq=5,
+    #     train_freq=128,
     #     batch_size=256,
     #     buffer_size=100000,
     #     learning_starts=1000,
@@ -421,5 +427,5 @@ if __name__ == "__main__":
     #     device='cpu',
     # )
 
-    agent.learn(total_timesteps=6000000)
+    agent.learn(total_timesteps=5000000)
     agent.save('runs')
