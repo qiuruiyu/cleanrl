@@ -21,8 +21,8 @@ class ASUEnv(gym.Env):
         """
         self.Tsim = env_config['Tsim'] if 'Tsim' in env_config.keys() else 2500
         self.obs_dict = env_config['obs_dict'] if 'obs_dict' in env_config.keys() else False
-        self.nu = 3
-        self.ny = 3
+        self.nu = 4
+        self.ny = 4
         self.back = 1
         # self.back = self.Tsim
         self.total_reward = []
@@ -63,7 +63,7 @@ class ASUEnv(gym.Env):
         self.e0 = (self.goal - self.y0) / self.e0_real  # init scaled error 
         
         self.target = np.zeros((self.ny, 1))
-        self.epsilon = 1e-2   # relaxable error
+        self.epsilon = 0   # relaxable error
         self.relaxed_target = self.epsilon * np.repeat(-self.epsilon * np.ones((self.ny, 1)) * (self.e0 > 0), self.back, axis=1)
         
         # weight parameters 
@@ -307,41 +307,28 @@ class ASUEnv(gym.Env):
         current_error = (self.goal - current_y) / self.e0_real
         self.update_state((current_error, self.u.copy()))
 
-        '''
-        Reward part & 
-        Terminated & Truncated judgement part 
-        '''
         reward = 0 
         terminated = False
         truncated = False
 
+        """Terminated and Truncated Judgement"""
         if self.num_step == self.Tsim:
             truncated = True
-            if len(self.total_reward) % 50 == 1:
-                os.makedirs('runs/figs', exist_ok=True)
-                self.render_plot()
+            # if len(self.total_reward) % 50 == 1:
+            #     os.makedirs('runs/figs', exist_ok=True)
+            #     self.render_plot()
 
+        """Reward Design"""
         # mse error of 3 deterministic vars in y 
-        reward -= np.sum((current_error[:3] - self.epsilon)**2)
+        reward -= np.sum((current_error[:4] - self.epsilon)**2)
+        
         # consumption of 3 vars in u, action is [-1, 1]
-        reward -= np.sum(action[:3]**2) * 0.01
-
-        # error for keeping y4 in a given range and keep as steady as possible 
-        # given_range = [0.6, 0.8]
-        # for i in range(3, self.ny):
-        #     if current_error[i] > given_range[1] or current_error[i] < given_range[0]:
-        #         abs_e = np.max([np.abs(current_error[i] - 0.6), np.abs(current_error[i] - 0.8)])
-        #         reward -= abs_e * 2 
-        # for keeping it steady 
-            # reward -= np.var(self.ysim[:self.num_step, i]) * 2
+        # reward -= np.sum(action[:3]**2) * 0.015
 
         # prevent over shooting
-        for i in range(3):  # only for the 3 vars ahead
-            if self.e0[i] * current_error[i] < 0:  # over shooting 
-                reward -= np.log(self.num_step) * np.abs(current_error[i])
-                
-
-        # reward /= 3 
+        # for i in range(3):  # only for the 3 vars ahead
+            # if self.e0[i] * current_error[i] < 0:  # over shooting 
+            #     reward -= np.log(self.num_step) * np.abs(current_error[i])
 
         self.total_reward[-1] += reward 
 
