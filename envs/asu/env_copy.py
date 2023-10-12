@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from gymnasium import spaces
 from gymnasium.utils import seeding
-from gymnasium.wrappers import (NormalizeObservation, NormalizeReward, TimeAwareObservation)
+from gymnasium.wrappers import NormalizeObservation, NormalizeReward, TimeAwareObservation
 from scipy import io
 
 
@@ -21,8 +21,9 @@ class ASUEnv(gym.Env):
         """
         self.Tsim = env_config['Tsim'] if 'Tsim' in env_config.keys() else 2500
         self.obs_dict = env_config['obs_dict'] if 'obs_dict' in env_config.keys() else False
-        self.nu = 3
-        self.ny = 3
+        self.y_idx = [0, 1, 2, 3]
+        self.nu = 4
+        self.ny = len(self.y_idx)
         self.back = 10
         # self.back = self.Tsim
         self.total_reward = []
@@ -38,26 +39,26 @@ class ASUEnv(gym.Env):
         self.y0 = np.array([
             93285,    # 空气量
             17940,    # 氧气量
-            37672,    # 氮气量
+            37672,    # 氮气量   
             1.434,    # 污氮气含量
             99.7648,  # 氧气纯度 
             0.317,    # 氮气纯度
-            9.55,     # AI701 * 
+            9.55,     # AI701 *   # original y7  
         ]).reshape(-1, 1)
 
         self.goal = np.array([
             99000, 
             19000,
-            39976, 
+            39976,           
             1.57, 
             99.7332, 
             0.3508, 
-            9.3461
+            9.3461,  # original target y7 
         ]).reshape(-1, 1)
         
         self.u0 = self.u0[:self.nu].reshape(-1, 1)
-        self.y0 = self.y0[:self.ny].reshape(-1, 1)
-        self.goal = self.goal[:self.ny].reshape(-1, 1)
+        self.y0 = self.y0[self.y_idx].reshape(-1, 1)
+        self.goal = self.goal[self.y_idx].reshape(-1, 1)
 
         self.e0_real = self.goal - self.y0  # init real error 
         self.e0 = (self.goal - self.y0) / self.e0_real  # init scaled error 
@@ -119,6 +120,7 @@ class ASUEnv(gym.Env):
 
     def assign_init_state(self):
         error = np.repeat(self.e0, self.back, axis=1)
+        derror = np.zeros_like(error)
         y = np.repeat(self.e0, self.back, axis=1)
         du = np.zeros((self.nu, self.back))
         u = np.repeat(np.ones((self.nu, 1)), self.back, axis=1)
@@ -131,7 +133,7 @@ class ASUEnv(gym.Env):
         else:  # array like 
             init_state = np.vstack(
                 (
-                    self.relaxed_target, 
+                    derror, 
                     error,
                     u,
                 )
@@ -159,6 +161,10 @@ class ASUEnv(gym.Env):
         '''
         hstack current state value
         '''
+        derror_ = error_ - np.hstack((
+            error_[:, 1:], current_error
+        ))
+
         error_ = np.hstack((
             error_[:, 1:], current_error
         ))
@@ -177,7 +183,7 @@ class ASUEnv(gym.Env):
             }
         else:
             self.state = np.vstack((
-                self.relaxed_target, error_, u_,
+                derror_, error_, u_,
             ))
     
     def rescale_action(self, action):
@@ -267,7 +273,7 @@ class ASUEnv(gym.Env):
             )
             change = np.sum(delta * step_cut)
             # update 
-            self.ysim[self.num_step, 6] = self.ysim[0, 6] + change 
+            self.ysim[self.num_step, 3] = self.ysim[0, 3] + change 
 
     def render_plot(self):
         t = np.array(range(self.Tsim))
@@ -314,21 +320,21 @@ class ASUEnv(gym.Env):
         """Terminated and Truncated Judgement"""
         if self.num_step == self.Tsim:
             truncated = True
-            if len(self.total_reward) % 15 == 1:
+            if len(self.total_reward) % 30 == 1:
                 os.makedirs('runs/figs', exist_ok=True)
                 self.render_plot()
 
         """Reward Design"""
         # mse error of 3 deterministic vars in y 
-        reward -= np.sum((current_error[:4] - self.epsilon)**2)
+        reward -= np.sum((current_error - self.epsilon)**2)
         
         # consumption of 3 vars in u, action is [-1, 1]
-        # reward -= np.sum(action**2) * 0.015
+        reward -= np.sum(action**2) * 0.015
 
         # prevent over shooting
         # for i in range(3):  # only for the 3 vars ahead
         #     if self.e0[i] * current_error[i] < 0:  # over shooting 
-        #         reward -= np.log(self.num_step) * np.abs(current_error[i])
+        #         reward -= self.num_step / self.Tsim * np.abs(current_error[i])
 
         reward /= 4 
 
@@ -363,7 +369,7 @@ class ASUEnv(gym.Env):
 def make_asu_env(rank=0, seed=0):
     env = ASUEnv(
         {
-            'Tsim': 600,
+            'Tsim': 1500,
             'obs_dict': False
         }
     )
@@ -377,7 +383,7 @@ if __name__ == "__main__":
     # env = VecNormalize(env, norm_obs=False)
     eval_env = ASUEnv(
         {
-            'Tsim': 1500,
+            'Tsim': 1000,
             'obs_dict': False
         }
     )
