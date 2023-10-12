@@ -3,7 +3,10 @@ import argparse
 import os
 import random
 import time
+import sys 
 from distutils.util import strtobool
+
+sys.path.append('./')
 
 import gymnasium as gym
 import numpy as np
@@ -13,6 +16,8 @@ import torch.nn.functional as F
 import torch.optim as optim
 from stable_baselines3.common.buffers import ReplayBuffer
 from torch.utils.tensorboard import SummaryWriter
+
+from envs.asu.env_copy import make_asu_env
 
 
 def parse_args():
@@ -67,12 +72,16 @@ def parse_args():
 
 def make_env(env_id, seed, idx, capture_video, run_name):
     def thunk():
-        if capture_video and idx == 0:
-            env = gym.make(env_id, render_mode="rgb_array")
-            env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
-        else:
-            env = gym.make(env_id)
+        # if capture_video and idx == 0:
+        #     env = gym.make(env_id, render_mode="rgb_array")
+        #     env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
+        # else:
+        #     env = gym.make(env_id)
+
+        env = make_asu_env()
+        env = gym.wrappers.FlattenObservation(env)  # deal with dm_control's Dict observation space
         env = gym.wrappers.RecordEpisodeStatistics(env)
+        env = gym.wrappers.ClipAction(env)
         env.action_space.seed(seed)
         return env
 

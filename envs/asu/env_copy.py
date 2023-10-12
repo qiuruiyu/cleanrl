@@ -314,7 +314,7 @@ class ASUEnv(gym.Env):
         """Terminated and Truncated Judgement"""
         if self.num_step == self.Tsim:
             truncated = True
-            if len(self.total_reward) % 30 == 1:
+            if len(self.total_reward) % 15 == 1:
                 os.makedirs('runs/figs', exist_ok=True)
                 self.render_plot()
 
@@ -323,12 +323,14 @@ class ASUEnv(gym.Env):
         reward -= np.sum((current_error[:4] - self.epsilon)**2)
         
         # consumption of 3 vars in u, action is [-1, 1]
-        reward -= np.sum(action**2) * 0.015
+        # reward -= np.sum(action**2) * 0.015
 
         # prevent over shooting
-        for i in range(3):  # only for the 3 vars ahead
-            if self.e0[i] * current_error[i] < 0:  # over shooting 
-                reward -= np.log(self.num_step) * np.abs(current_error[i])
+        # for i in range(3):  # only for the 3 vars ahead
+        #     if self.e0[i] * current_error[i] < 0:  # over shooting 
+        #         reward -= np.log(self.num_step) * np.abs(current_error[i])
+
+        reward /= 4 
 
         self.total_reward[-1] += reward 
 
@@ -357,11 +359,11 @@ class ASUEnv(gym.Env):
         self.state = self.assign_init_state()
 
         return self.state, {} 
-
+ 
 def make_asu_env(rank=0, seed=0):
     env = ASUEnv(
         {
-            'Tsim': 1500,
+            'Tsim': 600,
             'obs_dict': False
         }
     )
