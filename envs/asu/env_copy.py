@@ -21,9 +21,9 @@ class ASUEnv(gym.Env):
         """
         self.Tsim = env_config['Tsim'] if 'Tsim' in env_config.keys() else 2500
         self.obs_dict = env_config['obs_dict'] if 'obs_dict' in env_config.keys() else False
-        self.nu = 4
-        self.ny = 4
-        self.back = 1
+        self.nu = 3
+        self.ny = 3
+        self.back = 10
         # self.back = self.Tsim
         self.total_reward = []
         self.u0 = np.array([
@@ -275,11 +275,11 @@ class ASUEnv(gym.Env):
         # ny | nu 
         for i in range(self.ny):
             axs[i, 0].plot(t, self.ysim[:-1, i], 'b-', label='y{}'.format(i+1))
-            if i < 3:
-                axs[i, 0].plot([0, t[-1]], [self.goal[i], self.goal[i]], 'r--', label='goal')
-            else:
-                axs[i, 0].plot([0, t[-1]], [self.goal[i]-0.6*(self.e0_real[i]), self.goal[i]-0.6*(self.e0_real[i])], 'r--', label='goal')
-                axs[i, 0].plot([0, t[-1]], [self.goal[i]-0.8*(self.e0_real[i]), self.goal[i]-0.8*(self.e0_real[i])], 'r--', label='goal')
+            # if i < 3:
+            axs[i, 0].plot([0, t[-1]], [self.goal[i], self.goal[i]], 'r--', label='goal')
+            # else:
+            #     axs[i, 0].plot([0, t[-1]], [self.goal[i]-0.6*(self.e0_real[i]), self.goal[i]-0.6*(self.e0_real[i])], 'r--', label='goal')
+            #     axs[i, 0].plot([0, t[-1]], [self.goal[i]-0.8*(self.e0_real[i]), self.goal[i]-0.8*(self.e0_real[i])], 'r--', label='goal')
             axs[i, 0].grid(True)
             axs[i, 0].legend()
         for i in range(self.nu):
@@ -314,21 +314,21 @@ class ASUEnv(gym.Env):
         """Terminated and Truncated Judgement"""
         if self.num_step == self.Tsim:
             truncated = True
-            # if len(self.total_reward) % 50 == 1:
-            #     os.makedirs('runs/figs', exist_ok=True)
-            #     self.render_plot()
+            if len(self.total_reward) % 30 == 1:
+                os.makedirs('runs/figs', exist_ok=True)
+                self.render_plot()
 
         """Reward Design"""
         # mse error of 3 deterministic vars in y 
         reward -= np.sum((current_error[:4] - self.epsilon)**2)
         
         # consumption of 3 vars in u, action is [-1, 1]
-        # reward -= np.sum(action[:3]**2) * 0.015
+        reward -= np.sum(action**2) * 0.015
 
         # prevent over shooting
-        # for i in range(3):  # only for the 3 vars ahead
-            # if self.e0[i] * current_error[i] < 0:  # over shooting 
-            #     reward -= np.log(self.num_step) * np.abs(current_error[i])
+        for i in range(3):  # only for the 3 vars ahead
+            if self.e0[i] * current_error[i] < 0:  # over shooting 
+                reward -= np.log(self.num_step) * np.abs(current_error[i])
 
         self.total_reward[-1] += reward 
 
@@ -384,13 +384,13 @@ if __name__ == "__main__":
     from stable_baselines3 import PPO, DDPG, SAC, TD3
     from stable_baselines3.common.monitor import Monitor
 
-    agent = PPO(
-        policy='MlpPolicy',
-        env=eval_env,
-        verbose=1,
-        device='cpu',
-        tensorboard_log='./runs/',
-    )
+    # agent = PPO(
+    #     policy='MlpPolicy',
+    #     env=eval_env,
+    #     verbose=1,
+    #     device='cpu',
+    #     tensorboard_log='./runs/',
+    # )
 
     # agent = TD3(
     #     policy='MlpPolicy',
@@ -407,12 +407,24 @@ if __name__ == "__main__":
     #     env=eval_env,
     #     verbose=1,
     #     train_freq=128,
-    #     batch_size=256,
-    #     buffer_size=100000,
-    #     learning_starts=1000,
+    #     batch_size=512,
+    #     buffer_size=1000000,
+    #     learning_starts=200000,
     #     tensorboard_log='./runs/',
     #     device='cpu',
     # )
 
-    agent.learn(total_timesteps=5000000)
+    agent = DDPG(
+        policy='MlpPolicy',
+        env=eval_env,
+        verbose=1,
+        learning_rate=1e-4,
+        batch_size=256,
+        tau=0.005,
+        train_freq=256,
+        learning_starts=25e3,
+        tensorboard_log='./runs/',
+    )
+
+    agent.learn(total_timesteps=2000000)
     agent.save('runs')
