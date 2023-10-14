@@ -21,10 +21,10 @@ class ASUEnv(gym.Env):
         """
         self.Tsim = env_config['Tsim'] if 'Tsim' in env_config.keys() else 2500
         self.obs_dict = env_config['obs_dict'] if 'obs_dict' in env_config.keys() else False
-        self.y_idx = [0, 1, 2, 3]
-        self.nu = 4
+        self.y_idx = [0, 1, 2]
+        self.nu = 3
         self.ny = len(self.y_idx)
-        self.back = 10
+        self.back = 1
         # self.back = self.Tsim
         self.total_reward = []
         self.u0 = np.array([
@@ -49,6 +49,16 @@ class ASUEnv(gym.Env):
         self.goal = np.array([
             99000, 
             19000,
+            39976,           
+            1.57,
+            99.7332, 
+            0.3508, 
+            9.3461,  # original target y7 
+        ]).reshape(-1, 1)
+
+        self.goal = np.array([
+            97000, 
+            18500,
             39976,           
             1.57, 
             99.7332, 
@@ -121,6 +131,8 @@ class ASUEnv(gym.Env):
     def assign_init_state(self):
         error = np.repeat(self.e0, self.back, axis=1)
         derror = np.zeros_like(error)
+        integral_error = np.zeros_like(error)
+        self.integral_error_scale = 100
         y = np.repeat(self.e0, self.back, axis=1)
         du = np.zeros((self.nu, self.back))
         u = np.repeat(np.ones((self.nu, 1)), self.back, axis=1)
@@ -133,9 +145,11 @@ class ASUEnv(gym.Env):
         else:  # array like 
             init_state = np.vstack(
                 (
-                    derror, 
+                    # integral_error / self.integral_error_scale,
+                    self.relaxed_target,
                     error,
                     u,
+                    # np.zeros_like(u),
                 )
             )
         return init_state
@@ -145,8 +159,11 @@ class ASUEnv(gym.Env):
             obs_info = [obs[key] for key in obs.keys()]
             return tuple(obs_info)
         else:
-            error_ = obs[self.ny:2*self.ny, :]
+            integral_error_ = obs[:self.ny, :] * self.integral_error_scale
+            # relative_y = obs[:self.ny, :]
+            error_ = obs[:self.ny, :]
             u_ = obs[-self.nu:, :]
+            # du_ = obs[-self.nu:, :]
             return tuple([error_, u_])
     
     def update_state(self, info:tuple):
@@ -154,24 +171,35 @@ class ASUEnv(gym.Env):
         tuple format like (current_error, action)
         '''
         error_, u_ = self.get_obs_info(self.state)
-        current_error, current_u = info
+        current_error, current_u, current_du = info
         # current_u start from 1
         current_u /= self.u0
 
         '''
         hstack current state value
         '''
-        derror_ = error_ - np.hstack((
-            error_[:, 1:], current_error
-        ))
+        # derror_ = np.hstack((
+        #     error_[:, 1:], current_error
+        # )) - error_
+
+        # relative_y = np.hstack((
+        #     relative_y[:, 1:], (self.ysim[self.num_step, :].reshape(-1, 1) / self.y0)
+        # ))
+        # integral_error_ = np.hstack((
+        #     integral_error_[:, 1:], integral_error_[:, -1].reshape(-1, 1) + current_error
+        # )) / self.integral_error_scale
 
         error_ = np.hstack((
-            error_[:, 1:], current_error
+            error_[:, 1:], current_error,
         ))
 
         u_ = np.hstack((
-            u_[:, 1:], current_u
+            u_[:, 1:], current_u,
         ))
+
+        # du_ = np.hstack((
+        #     du_[:, 1:], current_du,
+        # ))
         
         '''
         vtstack the time frame for state value 
@@ -183,7 +211,7 @@ class ASUEnv(gym.Env):
             }
         else:
             self.state = np.vstack((
-                derror_, error_, u_,
+                self.relaxed_target, error_, u_,
             ))
     
     def rescale_action(self, action):
@@ -311,7 +339,7 @@ class ASUEnv(gym.Env):
 
         current_y = self.ysim[self.num_step, :].reshape(-1, 1)
         current_error = (self.goal - current_y) / self.e0_real
-        self.update_state((current_error, self.u.copy()))
+        self.update_state((current_error, self.u.copy(), action.copy()))
 
         reward = 0 
         terminated = False
@@ -329,7 +357,7 @@ class ASUEnv(gym.Env):
         reward -= np.sum((current_error - self.epsilon)**2)
         
         # consumption of 3 vars in u, action is [-1, 1]
-        reward -= np.sum(action**2) * 0.015
+        reward -= np.sum(action**2) * 0.02
 
         # prevent over shooting
         # for i in range(3):  # only for the 3 vars ahead

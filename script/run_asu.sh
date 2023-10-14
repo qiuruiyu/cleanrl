@@ -1,19 +1,20 @@
 #!/bin/bash
 
-# script for 3x3 ASU example 
+# script for 4x4 ASU example 
 # script all features added 
 
 python ./cleanrl/ppo_continuous_action.py \
-    --env-id control_ai701 \
+    --env-id control_y4 \
     --total-timesteps 5000000 \
     --num-envs 5 \
     --save-best-model True \
     --gamma 0.99 \
     --seed 1234 \
     --plot-logger True \
+    --num-steps 4096 \
 
 # python ./cleanrl/ppo_continuous_action.py \
-#     --env-id control_ai701 \
+#     --env-id control_y4 \
 #     --total-timesteps 5000000 \
 #     --num-envs 5 \
 #     --save-best-model True \
@@ -22,7 +23,7 @@ python ./cleanrl/ppo_continuous_action.py \
 #     --plot-logger True \
 
 # python ./cleanrl/ppo_continuous_action.py \
-#     --env-id control_ai701 \
+#     --env-id control_y4 \
 #     --total-timesteps 5000000 \
 #     --num-envs 5 \
 #     --save-best-model True \
@@ -31,7 +32,7 @@ python ./cleanrl/ppo_continuous_action.py \
 #     --plot-logger True \
 
 # python ./cleanrl/ppo_continuous_action.py \
-#     --env-id control_ai701 \
+#     --env-id control_y4 \
 #     --total-timesteps 5000000 \
 #     --num-envs 5 \
 #     --save-best-model True \
@@ -40,7 +41,7 @@ python ./cleanrl/ppo_continuous_action.py \
 #     --plot-logger True \
 
 # python ./cleanrl/ppo_continuous_action.py \
-#     --env-id control_ai701 \
+#     --env-id control_y4 \
 #     --total-timesteps 5000000 \
 #     --num-envs 5 \
 #     --save-best-model True \
@@ -49,7 +50,7 @@ python ./cleanrl/ppo_continuous_action.py \
 #     --plot-logger True \
 
 # python ./cleanrl/ppo_continuous_action.py \
-#     --env-id control_ai701 \
+#     --env-id control_y4 \
 #     --total-timesteps 5000000 \
 #     --num-envs 5 \
 #     --save-best-model True \
@@ -58,7 +59,7 @@ python ./cleanrl/ppo_continuous_action.py \
 #     --plot-logger True \
 
 # python ./cleanrl/ppo_continuous_action.py \
-#     --env-id control_ai701 \
+#     --env-id control_y4 \
 #     --total-timesteps 5000000 \
 #     --num-envs 5 \
 #     --save-best-model True \
