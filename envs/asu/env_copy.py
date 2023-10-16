@@ -21,10 +21,10 @@ class ASUEnv(gym.Env):
         """
         self.Tsim = env_config['Tsim'] if 'Tsim' in env_config.keys() else 2500
         self.obs_dict = env_config['obs_dict'] if 'obs_dict' in env_config.keys() else False
-        self.y_idx = [0, 1, 2]
-        self.nu = 3
+        self.y_idx = [0, 1, 2, 3]
+        self.nu = 4
         self.ny = len(self.y_idx)
-        self.back = 1
+        self.back = 10
         # self.back = self.Tsim
         self.total_reward = []
         self.u0 = np.array([
@@ -56,15 +56,15 @@ class ASUEnv(gym.Env):
             9.3461,  # original target y7 
         ]).reshape(-1, 1)
 
-        self.goal = np.array([
-            97000, 
-            18500,
-            39976,           
-            1.57, 
-            99.7332, 
-            0.3508, 
-            9.3461,  # original target y7 
-        ]).reshape(-1, 1)
+        # self.goal = np.array([
+        #     97000, 
+        #     18500,
+        #     39976,           
+        #     1.57, 
+        #     99.7332, 
+        #     0.3508, 
+        #     9.3461,  # original target y7 
+        # ]).reshape(-1, 1)
         
         self.u0 = self.u0[:self.nu].reshape(-1, 1)
         self.y0 = self.y0[self.y_idx].reshape(-1, 1)
@@ -145,8 +145,8 @@ class ASUEnv(gym.Env):
         else:  # array like 
             init_state = np.vstack(
                 (
-                    # integral_error / self.integral_error_scale,
-                    self.relaxed_target,
+                    integral_error / self.integral_error_scale,
+                    # self.relaxed_target,
                     error,
                     u,
                     # np.zeros_like(u),
@@ -161,16 +161,16 @@ class ASUEnv(gym.Env):
         else:
             integral_error_ = obs[:self.ny, :] * self.integral_error_scale
             # relative_y = obs[:self.ny, :]
-            error_ = obs[:self.ny, :]
+            error_ = obs[self.ny:2*self.ny, :]
             u_ = obs[-self.nu:, :]
             # du_ = obs[-self.nu:, :]
-            return tuple([error_, u_])
+            return tuple([integral_error_, error_, u_])
     
     def update_state(self, info:tuple):
         '''
         tuple format like (current_error, action)
         '''
-        error_, u_ = self.get_obs_info(self.state)
+        integral_error_, error_, u_ = self.get_obs_info(self.state)
         current_error, current_u, current_du = info
         # current_u start from 1
         current_u /= self.u0
@@ -185,9 +185,10 @@ class ASUEnv(gym.Env):
         # relative_y = np.hstack((
         #     relative_y[:, 1:], (self.ysim[self.num_step, :].reshape(-1, 1) / self.y0)
         # ))
-        # integral_error_ = np.hstack((
-        #     integral_error_[:, 1:], integral_error_[:, -1].reshape(-1, 1) + current_error
-        # )) / self.integral_error_scale
+        
+        integral_error_ = np.hstack((
+            integral_error_[:, 1:], integral_error_[:, -1].reshape(-1, 1) + current_error
+        )) / self.integral_error_scale
 
         error_ = np.hstack((
             error_[:, 1:], current_error,
@@ -211,7 +212,7 @@ class ASUEnv(gym.Env):
             }
         else:
             self.state = np.vstack((
-                self.relaxed_target, error_, u_,
+                integral_error_, error_, u_,
             ))
     
     def rescale_action(self, action):
@@ -357,12 +358,12 @@ class ASUEnv(gym.Env):
         reward -= np.sum((current_error - self.epsilon)**2)
         
         # consumption of 3 vars in u, action is [-1, 1]
-        reward -= np.sum(action**2) * 0.02
+        reward -= np.sum(action**2) * 0.015
 
         # prevent over shooting
-        # for i in range(3):  # only for the 3 vars ahead
-        #     if self.e0[i] * current_error[i] < 0:  # over shooting 
-        #         reward -= self.num_step / self.Tsim * np.abs(current_error[i])
+        for i in range(3):  # only for the 3 vars ahead
+            if self.e0[i] * current_error[i] < 0:  # over shooting 
+                reward -= self.num_step / self.Tsim * np.abs(current_error[i])
 
         reward /= 4 
 

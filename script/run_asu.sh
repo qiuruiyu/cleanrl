@@ -10,8 +10,10 @@ python ./cleanrl/ppo_continuous_action.py \
     --save-best-model True \
     --gamma 0.99 \
     --seed 1234 \
-    --plot-logger True \
-    --num-steps 4096 \
+    --num-steps 8192 \
+    # --learning-rate 1e-4 \
+    # --plot-logger False \
+    
 
 # python ./cleanrl/ppo_continuous_action.py \
 #     --env-id control_y4 \
