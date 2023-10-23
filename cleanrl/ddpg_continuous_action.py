@@ -17,7 +17,7 @@ import torch.optim as optim
 from stable_baselines3.common.buffers import ReplayBuffer
 from torch.utils.tensorboard import SummaryWriter
 
-from envs.asu.env_copy import make_asu_env
+from envs.asu.env import make_asu_env
 from envs.parafoil.simple_env import make_parafoil_env
 from envs.shell.shell import make_shell_env
 

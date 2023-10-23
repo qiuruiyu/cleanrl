@@ -16,7 +16,7 @@ import torch.optim as optim
 from torch.distributions.normal import Normal
 from torch.utils.tensorboard import SummaryWriter
 
-from envs.asu.env_copy import make_asu_env
+from envs.asu.env import make_asu_env
 from envs.parafoil.simple_env import make_parafoil_env
 from envs.shell.shell import make_shell_env
 from rl_plotter.logger import Logger

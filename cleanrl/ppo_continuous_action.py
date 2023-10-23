@@ -17,7 +17,7 @@ import torch.optim as optim
 from torch.distributions.normal import Normal
 from torch.utils.tensorboard import SummaryWriter
 
-from envs.asu.env_copy import make_asu_env
+from envs.asu.env_with_model import make_asu_env
 from envs.parafoil.simple_env import make_parafoil_env
 from envs.shell.shell import make_shell_env
 from rl_plotter.logger import Logger
@@ -99,7 +99,7 @@ def parse_args():
     return args
 
 
-def make_env(env_id, idx, capture_video, run_name, gamma, args):
+def make_env(env_id, idx, capture_video, run_name, gamma, args, env_cfg=None):
     def thunk():
         # if capture_video:
         #     env = gym.make(env_id, render_mode="rgb_array")
@@ -107,7 +107,7 @@ def make_env(env_id, idx, capture_video, run_name, gamma, args):
         #     env = gym.make(env_id)
         # q, r = args.qr
         # env = make_shell_env(q, r)
-        env = make_asu_env(idx)
+        env = make_asu_env(idx, env_config=env_cfg)
         # env = make_parafoil_env() 
         # env = gym.make('Pendulum-v1')
         env = gym.wrappers.FlattenObservation(env)  # deal with dm_control's Dict observation space
@@ -136,9 +136,11 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
 class Agent(nn.Module):
     def __init__(self, envs):
         super().__init__()
-        hid = 96
+        hid = 64
         self.critic = nn.Sequential(
             layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), hid)),
+            nn.Tanh(),
+            layer_init(nn.Linear(hid, hid)),
             nn.Tanh(),
             layer_init(nn.Linear(hid, hid)),
             nn.Tanh(),
@@ -146,6 +148,8 @@ class Agent(nn.Module):
         )
         self.actor_mean = nn.Sequential(
             layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), hid)),
+            nn.Tanh(),
+            layer_init(nn.Linear(hid, hid)),
             nn.Tanh(),
             layer_init(nn.Linear(hid, hid)),
             nn.Tanh(),
@@ -299,6 +303,7 @@ if __name__ == "__main__":
                     if info['episode']['r'] > best_rewards:
                         best_rewards = info['episode']['r']
                         torch.save(agent.state_dict(), os.path.join(model_path, 'best_agent.pt'))
+                        envs.envs[0].model.save_checkpoint(os.path.join(model_path, 'best_model.pt'))
 
         # bootstrap value if not done
         with torch.no_grad():
@@ -392,6 +397,8 @@ if __name__ == "__main__":
         writer.add_scalar("losses/approx_kl", approx_kl.item(), global_step)
         writer.add_scalar("losses/clipfrac", np.mean(clipfracs), global_step)
         writer.add_scalar("losses/explained_variance", explained_var, global_step)
+        # add model losses 
+        writer.add_scalar("losses/model_loss", envs.envs[0].losses[-1], global_step)
         print("SPS:", int(global_step / (time.time() - start_time)))
         writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
 

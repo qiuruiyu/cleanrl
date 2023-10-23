@@ -1,23 +1,15 @@
-from typing import Dict, List, Optional, Tuple, Union
-import numpy as np
-import matplotlib.pyplot as plt
-from scipy import io 
-import gymnasium as gym 
-from gymnasium import spaces
-from gymnasium.wrappers import NormalizeObservation, TimeAwareObservation, NormalizeReward
-from gymnasium.utils import seeding
-from stable_baselines3 import PPO, TD3, SAC, DQN
-from stable_baselines3.common.envs import SimpleMultiObsEnv
-from stable_baselines3.common import env_checker
-from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecNormalize
-from stable_baselines3.common.env_util import make_vec_env
-from stable_baselines3.common.utils import set_random_seed
-from stable_baselines3.common.callbacks import CallbackList, EvalCallback, CheckpointCallback
-import torch
 import copy
-import sys 
 import os 
-sys.path.append('./')
+import sys
+from typing import Dict, List, Optional, Tuple, Union
+
+import gymnasium as gym
+import matplotlib.pyplot as plt
+import numpy as np
+from gymnasium import spaces
+from gymnasium.utils import seeding
+from gymnasium.wrappers import NormalizeObservation, NormalizeReward, TimeAwareObservation
+from scipy import io
 
 
 class ASUEnv(gym.Env):
@@ -29,9 +21,11 @@ class ASUEnv(gym.Env):
         """
         self.Tsim = env_config['Tsim'] if 'Tsim' in env_config.keys() else 2500
         self.obs_dict = env_config['obs_dict'] if 'obs_dict' in env_config.keys() else False
-        self.nu = 4
-        self.ny = 7
-        self.back = self.Tsim
+        self.y_idx = [0, 1, 2]
+        self.nu = 3
+        self.ny = len(self.y_idx)
+        self.back = 1
+        # self.back = self.Tsim
         self.total_reward = []
         self.u0 = np.array([
             93285,  # 空气调节
@@ -43,45 +37,57 @@ class ASUEnv(gym.Env):
             # 37672,  # 氮气量
         ]).reshape(-1, 1)
         self.y0 = np.array([
-            93285,    # 空气量
-            17940,    # 氧气量
-            37672,    # 氮气量
-            1.434,    # 污氮气含量
-            99.7648,  # 氧气纯度 
-            0.317,    # 氮气纯度
-            9.55,     # AI701 * 
+            93285,    # 空气量      FIC101
+            17940,    # 氧气量      FIC102
+            37672,    # 氮气量      FIC103
+            1.434,    # 污氮气含量   AI5
+            99.7648,  # 氧气纯度    AIAS102
+            0.317,    # 氮气纯度    AIAS103
+            9.55,     # AI701   
         ]).reshape(-1, 1)
-        # self.goal = np.array([
-        #     98485, 
-        #     18940,
-        #     39772, 
-        #     1.434+0.1490, 
-        #     99.7648-0.0305, 
-        #     0.317+0.0260, 
-        #     9.57]).reshape(-1, 1)
+
         self.goal = np.array([
             99000, 
             19000,
-            39976, 
-            1.57, 
+            39976,           
+            1.57,
             99.7332, 
             0.3508, 
-            9.3461]).reshape(-1, 1)
+            9.3461,
+        ]).reshape(-1, 1)
+
+        # self.goal = np.array([
+        #     97000, 
+        #     18500,
+        #     39000,           
+        #     1.57, 
+        #     99.7332, 
+        #     0.3508, 
+        #     9.3461,
+        # ]).reshape(-1, 1)
         
-        self.target = self.goal / self.y0
+        # self.k = np.array([99000-93285, 19000-17940, 39976-37672]).reshape(-1, 1) / np.array([97000-93285, 18500-17940, 39000-37672]).reshape(-1, 1)
+        
+        self.k = np.array([1, 1, 1]).reshape(-1, 1)
+        
+        self.u0 = self.u0[:self.nu].reshape(-1, 1)
+        self.y0 = self.y0[self.y_idx].reshape(-1, 1)
+        self.goal = self.goal[self.y_idx].reshape(-1, 1)
+
+        self.e0_real = self.goal - self.y0  # init real error 
+        self.e0 = (self.goal - self.y0) / self.e0_real  # init scaled error 
+        
+        self.target = np.zeros((self.ny, 1))
+        self.epsilon = 0   # relaxable error
         
         # weight parameters 
         self.Q = np.ones((1, self.ny))
         self.R = np.ones((1, self.nu))
 
         # step parameters 
-        self.S = io.loadmat('./envs/asu/step_4.mat')['Step']
+        self.S = io.loadmat('./envs/asu/step_10.mat')['Step']
+        # self.S = io.loadmat('./envs/asu/S4.mat')['S']
         self.S = self.S[:self.Tsim, :, :]
-        self.N = self.S.shape[0]
-        self.M = np.block([
-            [np.zeros((self.N - 1, 1)), np.eye(self.N - 1)],
-            [np.zeros((1, self.N - 1)), 1]
-        ])
 
         '''
         =================== action space =================
@@ -90,40 +96,38 @@ class ASUEnv(gym.Env):
         |  6  | 4e-3 | 1e-2 | 2e-3 | 3e3 |  600  |  1200 |
         ==================================================
         '''
-        # self.action_low = np.array([0, 0, 0, 0, 0, 0, 0]).astype(np.float32)
-        # self.action_high = np.array([6, 4e-3, 1e-2, 2e-3, 3e3, 600, 1200]).astype(np.float32)
-        self.action_high = np.array([6, 4e-3, 1e-2, 2e-3]).astype(np.float32)
-        self.action_high *= 5
-        self.action_low = -self.action_high
-
+        if self.nu == 4:
+            self.action_low = np.array([-6, -4e-3, -1e-2, 0]).astype(np.float32) * 10
+            self.action_high = np.array([6, 4e-3, 1e-2, 2e-3]).astype(np.float32) * 10
+        elif self.nu == 3:
+            # self.action_low = np.array([0, 0, 0]).astype(np.float32) * 10 
+            self.action_low = np.array([-6, -4e-3, -1e-2]).astype(np.float32) * 10
+            self.action_high = np.array([6, 4e-3, 1e-2]).astype(np.float32) * 10
+        else:
+            raise NotImplementedError
+        
+        # self.action_low = -self.action_high
 
         self.action_space = spaces.Box(
-            # self.action_low, self.action_high,
             -1, 1,
             shape=(self.nu,)
         )
-        # self.num_divide = np.array([7, 5, 6, 5, 6, 6, 7])
-        # self.num_divide = np.array([7, 7, 7, 7])
-        # self.action_space = spaces.MultiDiscrete(self.num_divide)
 
         '''
         ================= observation space ================ 
+        | e | 
+        | u | 
+        ====================================================
         '''
         if self.obs_dict:
             self.observation_space = spaces.Dict(
                 spaces={
-                    # "goal": spaces.Box(0, np.inf, (self.ny, self.back), dtype=np.float64),
-                    "y": spaces.Box(-10, 10, (self.ny, self.back), dtype=np.float32),
                     "error": spaces.Box(-np.inf, np.inf, (self.ny, self.back), dtype=np.float32),
-                    "du": spaces.Box(-1, 1, (self.nu, self.back), dtype=np.float32),
                     "u": spaces.Box(-10, 10, (self.nu, self.back), dtype=np.float64),
                 } 
             )
         else: 
-            # self.obs_low = np.array([-np.inf, -1]).astype(np.float32)
-            # self.obs_high = np.array([np.inf, 1]).astype(np.float32)
             self.observation_space = spaces.Box(
-                # self.obs_low, self.obs_high,
                 -np.inf, np.inf,
                 shape=(2*self.ny+2*self.nu, self.back)
             )
@@ -131,27 +135,26 @@ class ASUEnv(gym.Env):
         self.state = self.assign_init_state() 
 
     def assign_init_state(self):
-        # goal = np.repeat(self.goal, self.back, axis=1)
-        y = np.repeat(np.zeros((7, 1)), self.back, axis=1)
-        # error = np.repeat(np.ones((7, 1)), self.back, axis=1)
-        error = np.repeat(self.target-1, self.back, axis=1)
+        error = np.repeat(self.e0, self.back, axis=1)
+        derror = np.zeros_like(error)
+        integral_error = np.zeros_like(error)
+        self.integral_error_scale = 100
+        y = np.repeat(self.e0, self.back, axis=1)
         du = np.zeros((self.nu, self.back))
-        u = np.repeat(np.zeros((self.nu, 1)), self.back, axis=1)
+        u = np.repeat(np.ones((self.nu, 1)), self.back, axis=1)
+
         if self.obs_dict:
             init_state = {
-                # "goal": goal,
-                "y": y,
                 "error": error,
-                "du": du,
                 "u": u,
             }
-        else:
+        else:  # array like 
             init_state = np.vstack(
                 (
-                    y,
+                    integral_error / self.integral_error_scale,
                     error,
-                    du,
                     u,
+                    np.zeros_like(u),
                 )
             )
         return init_state
@@ -161,38 +164,47 @@ class ASUEnv(gym.Env):
             obs_info = [obs[key] for key in obs.keys()]
             return tuple(obs_info)
         else:
-            y_ = obs[:self.ny, :]
+            integral_error_ = obs[:self.ny, :] * self.integral_error_scale
+            # relative_y = obs[:self.ny, :]
             error_ = obs[self.ny:2*self.ny, :]
-            du_ = obs[-2*self.nu:-self.nu, :]
-            u_ = obs[-self.nu:, :]
-            return tuple([y_, error_, du_, u_]) 
+            u_ = obs[-2*self.nu:-self.nu, :]
+            du_ = obs[-self.nu:, :]
+            return tuple([integral_error_, error_, u_, du_])
     
     def update_state(self, info:tuple):
         '''
         tuple format like (current_error, action)
         '''
-        y_, error_, du_, u_ = self.get_obs_info(self.state)
-        current_y, current_error, current_du, current_u = copy.deepcopy(info)
+        integral_error_, error_, u_, du_ = self.get_obs_info(self.state)
+        current_error, current_u, current_du = info
+        # current_u start from 1
         current_u /= self.u0
 
         '''
         hstack current state value
         '''
-        y_ = np.hstack((
-            y_[:, 1:], current_y - 1
-        ))
+        # derror_ = np.hstack((
+        #     error_[:, 1:], current_error
+        # )) - error_
+
+        # relative_y = np.hstack((
+        #     relative_y[:, 1:], (self.ysim[self.num_step, :].reshape(-1, 1) / self.y0)
+        # ))
+        
+        integral_error_ = np.hstack((
+            integral_error_[:, 1:], integral_error_[:, -1].reshape(-1, 1) + current_error
+        )) / self.integral_error_scale
 
         error_ = np.hstack((
-            error_[:, 1:], current_error
-            # error_[:, 1:], current_error + error_[:, -1].reshape(-1, 1)  # integral error 
+            error_[:, 1:], current_error,
         ))
-        
-        du_ = np.hstack((
-            du_[:, 1:], current_du
-        ))        
-        
+
         u_ = np.hstack((
-            u_[:, 1:], current_u - 1
+            u_[:, 1:], current_u,
+        ))
+
+        du_ = np.hstack((
+            du_[:, 1:], current_du,
         ))
         
         '''
@@ -200,26 +212,22 @@ class ASUEnv(gym.Env):
         '''
         if self.obs_dict:
             self.state = {
-                "y": y_,
                 "error": error_,
-                "du": du_,
                 "u": u_,
             }
         else:
             self.state = np.vstack((
-                y_, error_, du_, u_,
+                integral_error_, error_, u_, du_
             ))
     
     def rescale_action(self, action):
-        action = action.squeeze() # change to vector 
-        # res = self.action_low + (self.action_high - self.action_low) * ((action + 1) / 2)
-        res = (action + 1) / 2 * self.action_high
-        # res = self.action_low.reshape(-1, 1) + action * ((self.action_high - self.action_low).reshape(-1, 1) / (self.num_divide-1).reshape(-1, 1))
+        # [-1, 1]
+        action = action.squeeze() # change to vector
+        # res = action * self.action_high 
+        res = (action + 1) / 2 * (self.action_high - self.action_low) + self.action_low
         return res
     
     def calculation_output(self):
-        # y = y.reshape(-1, 1)
-
         # y1 - y3
         delta = (self.usim[1:self.num_step+1, :3] - self.usim[:self.num_step, :3]).T
         step_cut = np.vstack(
@@ -234,76 +242,92 @@ class ASUEnv(gym.Env):
         self.ysim[self.num_step, :3] = self.ysim[0, :3] + change.reshape(1, -1)
         
         # delta is same for all y later 
-        delta = np.vstack(
-            (
-                (self.usim[1:self.num_step+1, 3] - self.usim[:self.num_step, 3]).reshape(1, -1),
-                (self.ysim[1:self.num_step+1, 0] - self.ysim[:self.num_step, 0]).reshape(1, -1),
-                (self.ysim[1:self.num_step+1, 1] - self.ysim[:self.num_step, 1]).reshape(1, -1),
-                (self.ysim[1:self.num_step+1, 2] - self.ysim[:self.num_step, 2]).reshape(1, -1),
+        if self.ny >= 4:
+            delta = np.vstack(
+                (
+                    (self.usim[1:self.num_step+1, 3] - self.usim[:self.num_step, 3]).reshape(1, -1),
+                    (self.ysim[1:self.num_step+1, 0] - self.ysim[:self.num_step, 0]).reshape(1, -1),
+                    (self.ysim[1:self.num_step+1, 1] - self.ysim[:self.num_step, 1]).reshape(1, -1),
+                    (self.ysim[1:self.num_step+1, 2] - self.ysim[:self.num_step, 2]).reshape(1, -1),
+                )
             )
-        )
 
-        # y4 (AI5)
-        step_cut = np.vstack(
-            (
-                np.flipud(self.S[:self.num_step, 3, 3]).reshape(1, -1),
-                np.flipud(self.S[:self.num_step, 3, 4]).reshape(1, -1),
-                np.flipud(self.S[:self.num_step, 3, 5]).reshape(1, -1),
-                np.flipud(self.S[:self.num_step, 3, 6]).reshape(1, -1),
+        if 3 in self.y_idx:
+            # y4 (AI5)
+            step_cut = np.vstack(
+                (
+                    np.flipud(self.S[:self.num_step, 3, 3]).reshape(1, -1),
+                    np.flipud(self.S[:self.num_step, 3, 4]).reshape(1, -1),
+                    np.flipud(self.S[:self.num_step, 3, 5]).reshape(1, -1),
+                    np.flipud(self.S[:self.num_step, 3, 6]).reshape(1, -1),
+                )
             )
-        )
-        change = np.sum(delta * step_cut)
-        # update 
-        self.ysim[self.num_step, 3] = self.ysim[0, 3] + change
+            change = np.sum(delta * step_cut)
+            # update 
+            self.ysim[self.num_step, self.y_idx.index(3)] = self.ysim[0, self.y_idx.index(3)] + change
 
-        # y5 (AIAS102)
-        step_cut = np.vstack(
-            (
-                np.flipud(self.S[:self.num_step, 4, 3]).reshape(1, -1),
-                np.flipud(self.S[:self.num_step, 4, 4]).reshape(1, -1),
-                np.flipud(self.S[:self.num_step, 4, 5]).reshape(1, -1),
-                np.flipud(self.S[:self.num_step, 4, 6]).reshape(1, -1),
+        if 4 in self.y_idx:
+            # y5 (AIAS102)
+            step_cut = np.vstack(
+                (
+                    np.flipud(self.S[:self.num_step, 4, 3]).reshape(1, -1),
+                    np.flipud(self.S[:self.num_step, 4, 4]).reshape(1, -1),
+                    np.flipud(self.S[:self.num_step, 4, 5]).reshape(1, -1),
+                    np.flipud(self.S[:self.num_step, 4, 6]).reshape(1, -1),
+                )
             )
-        )
-        change = np.sum(delta * step_cut)
-        # update 
-        self.ysim[self.num_step, 4] = self.ysim[0, 4] + change
-        if self.ysim[self.num_step, 4] >= 99.98:
-            self.ysim[self.num_step, 4] = 99.98
+            change = np.sum(delta * step_cut)
+            # update 
+            self.ysim[self.num_step, self.y_idx.index(4)] = self.ysim[0, self.y_idx.index(4)] + change
+            if self.ysim[self.num_step, self.y_idx.index(4)] >= 99.98:
+                self.ysim[self.num_step, self.y_idx.index(4)] = 99.98
 
-        # y6 (ASAS103)
-        step_cut = np.vstack(
-            (
-                np.flipud(self.S[:self.num_step, 5, 3]).reshape(1, -1),
-                np.flipud(self.S[:self.num_step, 5, 4]).reshape(1, -1),
-                np.flipud(self.S[:self.num_step, 5, 5]).reshape(1, -1),
-                np.flipud(self.S[:self.num_step, 5, 6]).reshape(1, -1),
+        if 5 in self.y_idx:
+            # y6 (ASAS103)
+            step_cut = np.vstack(
+                (
+                    np.flipud(self.S[:self.num_step, 5, 3]).reshape(1, -1),
+                    np.flipud(self.S[:self.num_step, 5, 4]).reshape(1, -1),
+                    np.flipud(self.S[:self.num_step, 5, 5]).reshape(1, -1),
+                    np.flipud(self.S[:self.num_step, 5, 6]).reshape(1, -1),
+                )
             )
-        )
-        change = np.sum(delta * step_cut)
-        # update 
-        self.ysim[self.num_step, 5] = self.ysim[0, 5] + change
+            change = np.sum(delta * step_cut)
+            # update 
+            self.ysim[self.num_step, self.y_idx.index(5)] = self.ysim[0, self.y_idx.index(5)] + change
 
-        # y7 (AI701)
-        step_cut = np.vstack(
-            (
-                np.flipud(self.S[:self.num_step, 6, 3]).reshape(1, -1),
-                np.flipud(self.S[:self.num_step, 6, 4]).reshape(1, -1),
-                np.flipud(self.S[:self.num_step, 6, 5]).reshape(1, -1),
-                np.flipud(self.S[:self.num_step, 6, 6]).reshape(1, -1),
+        if 6 in self.y_idx:
+            # y7 (AI701)
+            step_cut = np.vstack(
+                (
+                    np.flipud(self.S[:self.num_step, 6, 3]).reshape(1, -1),
+                    np.flipud(self.S[:self.num_step, 6, 4]).reshape(1, -1),
+                    np.flipud(self.S[:self.num_step, 6, 5]).reshape(1, -1),
+                    np.flipud(self.S[:self.num_step, 6, 6]).reshape(1, -1),
+                )
             )
-        )
-        change = np.sum(delta * step_cut)
-        # update 
-        self.ysim[self.num_step, 6] = self.ysim[0, 6] + change 
+            change = np.sum(delta * step_cut)
+            # update 
+            self.ysim[self.num_step, self.y_idx.index(6)] = self.ysim[0, self.y_idx.index(6)] + change 
 
     def render_plot(self):
         t = np.array(range(self.Tsim))
-        fig, axs = plt.subplots(7, 1, figsize=(6, 9))
+        fig, axs = plt.subplots(np.max([self.ny, self.nu]), 2, figsize=(12, 9))
+        # ny | nu 
         for i in range(self.ny):
-            axs[i].plot(t, self.ysim[:-1, i], 'b-')
-            axs[i].plot([0, t[-1]], [self.goal[i], self.goal[i]], 'r--')
-        plt.show()
+            axs[i, 0].plot(t, self.ysim[:-1, i], 'b-', label='y{}'.format(i+1))
+            # if i < 3:
+            axs[i, 0].plot([0, t[-1]], [self.goal[i], self.goal[i]], 'r--', label='goal')
+            # else:
+            #     axs[i, 0].plot([0, t[-1]], [self.goal[i]-0.6*(self.e0_real[i]), self.goal[i]-0.6*(self.e0_real[i])], 'r--', label='goal')
+            #     axs[i, 0].plot([0, t[-1]], [self.goal[i]-0.8*(self.e0_real[i]), self.goal[i]-0.8*(self.e0_real[i])], 'r--', label='goal')
+            axs[i, 0].grid(True)
+            axs[i, 0].legend()
+        for i in range(self.nu):
+            axs[i, 1].plot(t, self.usim[:-1, i], 'b-', label='u{}'.format(i+1))
+            axs[i, 1].grid(True)
+            axs[i, 1].legend()
+        plt.savefig('runs/figs/fig_{}_{}.png'.format(len(self.total_reward), int(self.total_reward[-1].item())))
 
     def step(self, action):
         """
@@ -311,7 +335,6 @@ class ASUEnv(gym.Env):
         :return: tuple(observation, reward, terminated, truncated, info)
         """
         action = action.reshape(-1, 1)
-        # action = np.clip(action, np.zeros((self.nu, 1)), self.action_high.reshape(-1, 1))
         self.num_step += 1
         self.du = self.rescale_action(action).reshape(-1, 1)
         # self.du = action
@@ -319,39 +342,48 @@ class ASUEnv(gym.Env):
         self.dusim[self.num_step, :] = self.du.squeeze() 
         self.usim[self.num_step, :] = self.u.squeeze() 
 
-        '''
-        Optimized NumPy operation, faster x1.25
-        '''
-        # self.yk = self.M.dot(self.yk)
-        # self.yk += np.matmul(self.S, self.du).squeeze()
-        # tmp_y = self.yk[0, :].reshape(-1, 1)
-        # tmp_y *= 10
-        # self.ysim[self.num_step, :] = tmp_y.squeeze() 
         self.calculation_output()
 
-        # current_error = (self.goal - self.ysim[self.num_step, :].reshape(-1, 1)) / (self.goal - self.y0)
-        current_y = self.ysim[self.num_step, :].reshape(-1, 1) / self.y0
-        current_error = self.target - current_y
-        # print(current_error)
-        # current_error = self.ysim[self.num_step, :].reshape(-1, 1) - self.goal
-        self.update_state((current_y, current_error, action, self.u))
+        current_y = self.ysim[self.num_step, :].reshape(-1, 1)
+        current_error = (self.goal - current_y) / self.e0_real
+        self.update_state((current_error, self.u.copy(), action.copy()))
 
-        '''
-        Reward part & 
-        Terminated & Truncated judgement part 
-        '''
         reward = 0 
         terminated = False
         truncated = False
 
+        """Terminated and Truncated Judgement"""
         if self.num_step == self.Tsim:
-            # self.render_plot()
             truncated = True
-        reward -= np.sum(current_error**2) * 100
-        # reward -= np.sum(self.Q.dot(current_error**2))
-                        #   + self.R.dot(action**2))
-        # reward -= np.sum(self.Q.dot(current_error[:-1, :]**2))
-                        #   + self.R.dot(action**2))
+            if len(self.total_reward) % 30 == 1:
+                os.makedirs('runs/figs', exist_ok=True)
+                self.render_plot()
+
+        """Reward Design"""
+        # mse error of 3 deterministic vars in y 
+        reward -= np.sum((current_error[:3])**2)
+        # mse error of other vars in y
+        # reward -= 0.2 * np.sum((current_error[3:] - self.epsilon)**2)
+        # reward -= 0.3 * np.sum((current_error[-1] - self.epsilon)**2)
+    
+        # consumption of 3 vars in u, action is [-1, 1]
+        reward -= np.sum(action**2) * 0.005
+        
+        # reward for range of y composition
+        # if self.ysim[self.num_step, -1]: 
+        #     reward += 10
+        # if self.ysim[self.num_step, -1] < 9:
+        #     reward -= np.abs(self.ysim[self.num_step, -1] - 9)
+        # if self.ysim[self.num_step, -1] > 9.5:
+        #     reward -= np.abs(self.ysim[self.num_step, -1] - 9.5)
+
+        # prevent over shooting
+        for i in range(3):  # only for the 3 vars ahead
+            if self.e0[i] * current_error[i] < 0:  # over shooting 
+                # reward -= self.num_step / self.Tsim * np.abs(current_error[i])
+                reward -= (current_error[i] - self.e0[i] * 1e-6) **2 * 10
+
+        reward /= 4 
 
         self.total_reward[-1] += reward 
 
@@ -375,52 +407,21 @@ class ASUEnv(gym.Env):
         self.ysim = np.vstack((
             self.y0.copy().T,
             np.zeros((self.Tsim, self.ny))
-        ))  
-        
-        # step yk 
-        self.yk = np.repeat(self.y0.T, self.N, axis=0)  # N x yk
+        ))         
 
         self.state = self.assign_init_state()
-        # self.state = self.observation_space.sample() 
 
         return self.state, {} 
-
-    # dulb = [0, 0,    0,    0,    0, -inf, -inf]';
-    # duub = [6, 0.004, 0.01, 0.002, inf, inf, inf]';
-    # ulb = [93000, 56, 47, 57, 93000, 17900, 37000]';
-    # uub = [99000, 60, 57, 58.5, 99000, 19000, 40000]';
-
-
+ 
 def make_asu_env(rank=0, seed=0):
-    # def _init():
     env = ASUEnv(
         {
-            'Tsim': 800,
+            'Tsim': 500,
             'obs_dict': False
         }
     )
     env.reset(seed=seed+rank)
     return env
-    # set_random_seed(seed)
-    # return _init
-
-
-def square_schedule(init_value: float):
-    """
-    Linear learning rate schedule.
-    :param init_value: initial learning rate
-    :return: schedule that computes current learning rate
-    depending on remaining progress
-    """
-    def func(progress_remaining: float) -> float:
-        """
-        Progress will decrease from 1 to 0
-        :param progress_remaining:
-        :return: current learning rate
-        """
-        return init_value / (2**(1-progress_remaining))
-    return func
-
 
 
 if __name__ == "__main__":
@@ -429,192 +430,56 @@ if __name__ == "__main__":
     # env = VecNormalize(env, norm_obs=False)
     eval_env = ASUEnv(
         {
-            'Tsim': 400,
+            'Tsim': 500,
             'obs_dict': False
         }
     )
-    # eval_env = DummyVecEnv([make_env(1)])
-    # eval_env = VecNormalize(eval_env, clip_obs=1000, clip_reward=1000)
 
-    # config = {
-    #     'policy_type': 'MlpPolicy',
-    #     'total_timesteps': 10000000,
-    # }
+    import stable_baselines3 as sb3
+    from stable_baselines3 import PPO, DDPG, SAC, TD3
+    from stable_baselines3.common.monitor import Monitor
 
-    # run = wandb.init(
-    #     project='sb3',
-    #     config=config,
-    #     sync_tensorboard=True
-    # )
-
-    # wandb_callback = WandbCallback(
-    #     model_save_path='./sb3_train/wandb_model/',
-    #     verbose=2,
-    # )
-
-    eval_callback = EvalCallback(
-        eval_env=eval_env,
-        best_model_save_path='./sb3_train_error/best_model/',
-        log_path='./sb3_train_error/log/',
-        eval_freq=8000,
-        deterministic=True,
-        verbose=1,
-    )
-
-    checkpoint_callback = CheckpointCallback(
-        save_freq=20480,
-        save_path='./sb3_train_error/checkpoint/',
-        # save_replay_buffer=True,
-        save_vecnormalize=True,
-    )
-
-    callback_list = CallbackList([eval_callback, checkpoint_callback])
-
-    policy_kwargs = dict(net_arch=dict(pi=[64, 64], vf=[64, 64]))
-
-    agent = PPO(
-        policy='MlpPolicy',
-        env=eval_env,
-        policy_kwargs=policy_kwargs,
-        n_steps=8000,
-        batch_size=600,
-        verbose=2,
-        tensorboard_log='./',
-        learning_rate=square_schedule(1e-3),
-        gamma=0.99
-    )
-
-    # agent = DQN(
+    # agent = PPO(
     #     policy='MlpPolicy',
     #     env=eval_env,
-    #     learning_rate=square_schedule(5e-4),
-    #     learning_starts=50000,
-    #     batch_size=320,
-    #     exploration_initial_eps=1.0,
-    #     exploration_final_eps=0.05,
-    #     tensorboard_log='./',
-    #     verbose=2
-    # )
-
-    # agent = SAC(
-    #     policy='MlpPolicy',
-    #     env=eval_env,
-    #     learning_rate=square_schedule(1e-3),
-    #     batch_size=640,
-    #     learning_starts=10000,
-    #     # optimize_memory_usage=True,
-    #     tensorboard_log='./',
-    #     verbose=2
+    #     verbose=1,
+    #     device='cpu',
+    #     tensorboard_log='./runs/',
     # )
 
     # agent = TD3(
     #     policy='MlpPolicy',
     #     env=eval_env,
-    #     learning_rate=5e-4,
-    #     learning_starts=10000,
-    #     buffer_size=30000,
-    #     batch_size=500,
-    #     train_freq=(1, 'episode'),
-    #     tensorboard_log='./mbp/',
     #     verbose=1,
+    #     batch_size=1024,
+    #     buffer_size=100000,
+    #     learning_starts=20000,
+    #     tensorboard_log='./runs/',
     # )
 
-    agent.learn(
-        total_timesteps=1000000,
-        progress_bar=True,
-        callback=callback_list,
-        )
-
-    '''
-    --------------------------------------------------------------------------------
-    --------------------------------  RAY FRAMEWORK --------------------------------
-    --------------------------------------------------------------------------------
-    '''
-
-    # ray.init() 
-
-    # # register_env('ASU-v0', lambda cfg: NormalizeReward(TimeAwareObservation(ASUEnv(cfg))))
-    # register_env('ASU-v0', lambda cfg: ASUEnv(cfg))
-
-    # print('-------------- Env registeration done -----------------')
-    # # algo_cfg = ppo.PPOConfig()
-    # # algo_cfg = sac.SACConfig()
-    # algo_cfg = dqn.DQNConfig()
-    # algo_cfg.environment(
-    #     env='ASU-v0',
-    #     disable_env_checking=True,
-    #     env_config={
-    #         'Tsim':1000,
-    #         'obs_dict': False
-    #     },
-    #     auto_wrap_old_gym_envs=True,
-    # )
-    # algo_cfg.rollouts(
-    #     num_rollout_workers=15,
-    #     num_envs_per_worker=1
-    # )
-    # algo_cfg.resources(
-    #     num_cpus_per_worker=1,
-    # )
-    # algo_cfg.framework('torch')
-    # algo_cfg.training(
-    #     lr_schedule=[
-    #         [0, 5e-4],
-    #         [1000000, 5e-5],
-    #         [2000000, 5e-6],
-    #         [4000000, 5e-7]
-    #     ],
-    #     gamma=0.99,    
-    #     clip_param=0.2,
-    #     use_gae=True,
-    #     lambda_=0.95,
-    # )
-    # algo_cfg.model
-    # '''
-    # config for PPO 
-    # '''
-    # algo_cfg.train_batch_size = 20000
-    # algo_cfg.sgd_minibatch_size = 5000
-    # algo_cfg.num_sgd_iter = 10
-    # '''
-    # config for SAC
-    # '''
-    # # algo_cfg.n_step = 20 
-    # # algo_cfg.train_batch_size = 25000
-    # # algo_cfg.num_steps_sampled_before_learning_starts = 1e4
-    # # algo_cfg.target_network_update_freq = 1e4 
-
-    # # algo_cfg.replay_buffer_config['capacity'] = int(5e4)
-    # algo_cfg.debugging(log_level='INFO')
-    # algo_cfg.evaluation(
-    #     evaluation_num_workers=1,
-    #     evaluation_duration=10,
-    #     evaluation_duration_unit='episodes',
+    # agent = SAC(
+    #     policy='MlpPolicy',
+    #     env=eval_env,
+    #     verbose=1,
+    #     train_freq=128,
+    #     batch_size=512,
+    #     buffer_size=1000000,
+    #     learning_starts=200000,
+    #     tensorboard_log='./runs/',
+    #     device='cpu',
     # )
 
-    # # MODEL_DEFAULTS['fcnet_hiddens'] = [64, 64]
-    # # MODEL_DEFAULTS['fcnet_activation'] = 'relu'
-    # # MODEL_DEFAULTS['use_attention'] = True
-    # # algo_cfg.model = MODEL_DEFAULTS
+    agent = DDPG(
+        policy='MlpPolicy',
+        env=eval_env,
+        verbose=1,
+        learning_rate=1e-4,
+        batch_size=256,
+        tau=0.005,
+        train_freq=256,
+        learning_starts=25e3,
+        tensorboard_log='./runs/',
+    )
 
-    # algo = algo_cfg.build()
-
-    # print('----------------- Algorithm build done ---------------------')
-
-    # episode_reward = [] 
-
-    # for i in range(50000):
-    #     res_train = algo.train()
-    #     print('------------------ iteration ' + str(i) + '------------------')
-    #     print(pretty_print(res_train['sampler_results']))
-    #     # print(res_train['sampler_results']['episode_reward_mean'])
-    #     print(pretty_print(res_train['info']['learner']))
-    #     episode_reward.append(res_train['hist_stats']['episode_reward'])  # sampled reward for each episode from each sub worker
-    #     if i % 20 == 0 and i > 5:
-    #         algo.save('./model/iteration_' + str(i))
-    #         try:
-    #             np.save('./model/iteration_' + str(i), np.array(episode_reward))
-    #         except:
-    #             pass 
-
-    # ray.shutdown() 
+    agent.learn(total_timesteps=2000000)
+    agent.save('runs')
