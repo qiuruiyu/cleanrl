@@ -34,6 +34,9 @@ __pycache__/
 
 # Distribution / packaging
 .Python
+models/
+stable_models/
+runs/
 build/
 develop-eggs/
 dist/
@@ -110,6 +113,7 @@ celerybeat-schedule
 .env
 .venv
 env/
+envs/
 venv/
 ENV/
 env.bak/

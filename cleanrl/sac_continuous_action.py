@@ -3,9 +3,12 @@ import argparse
 import os
 import random
 import time
+import sys 
 from distutils.util import strtobool
 
-import gym
+sys.path.append('./')
+
+import gymnasium as gym 
 import numpy as np
 import torch
 import torch.nn as nn
@@ -13,6 +16,8 @@ import torch.nn.functional as F
 import torch.optim as optim
 from stable_baselines3.common.buffers import ReplayBuffer
 from torch.utils.tensorboard import SummaryWriter
+
+from envs.asu.env import make_asu_env
 
 
 def parse_args():
@@ -72,13 +77,15 @@ def parse_args():
 def make_env(env_id, seed, idx, capture_video, run_name):
     def thunk():
         env = gym.make(env_id)
+        # env = gym.wrappers.RecordEpisodeStatistics(env)
+        # if capture_video:
+        #     if idx == 0:
+        #         env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
+        # env = make_asu_env() 
+        env = gym.wrappers.FlattenObservation(env)  # deal with dm_control's Dict observation space
         env = gym.wrappers.RecordEpisodeStatistics(env)
-        if capture_video:
-            if idx == 0:
-                env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
-        env.seed(seed)
+        env = gym.wrappers.ClipAction(env)
         env.action_space.seed(seed)
-        env.observation_space.seed(seed)
         return env
 
     return thunk
@@ -204,12 +211,13 @@ if __name__ == "__main__":
         envs.single_observation_space,
         envs.single_action_space,
         device,
-        handle_timeout_termination=True,
+        # handle_timeout_termination=True,
+        handle_timeout_termination=False,
     )
     start_time = time.time()
 
     # TRY NOT TO MODIFY: start the game
-    obs = envs.reset()
+    obs, info = envs.reset()
     for global_step in range(args.total_timesteps):
         # ALGO LOGIC: put action logic here
         if global_step < args.learning_starts:
@@ -219,11 +227,11 @@ if __name__ == "__main__":
             actions = actions.detach().cpu().numpy()
 
         # TRY NOT TO MODIFY: execute the game and log data.
-        next_obs, rewards, dones, infos = envs.step(actions)
+        next_obs, rewards, terminated, truncations, infos = envs.step(actions)
 
         # TRY NOT TO MODIFY: record rewards for plotting purposes
-        for info in infos:
-            if "episode" in info.keys():
+        if "final_info" in infos:
+            for info in infos["final_info"]:
                 print(f"global_step={global_step}, episodic_return={info['episode']['r']}")
                 writer.add_scalar("charts/episodic_return", info["episode"]["r"], global_step)
                 writer.add_scalar("charts/episodic_length", info["episode"]["l"], global_step)
@@ -231,10 +239,10 @@ if __name__ == "__main__":
 
         # TRY NOT TO MODIFY: save data to reply buffer; handle `terminal_observation`
         real_next_obs = next_obs.copy()
-        for idx, d in enumerate(dones):
-            if d:
-                real_next_obs[idx] = infos[idx]["terminal_observation"]
-        rb.add(obs, real_next_obs, actions, rewards, dones, infos)
+        for idx, trunc in enumerate(truncations):
+            if trunc:
+                real_next_obs[idx] = infos["final_observation"][idx]
+        rb.add(obs, real_next_obs, actions, rewards, terminated, infos)
 
         # TRY NOT TO MODIFY: CRUCIAL step easy to overlook
         obs = next_obs
@@ -290,7 +298,11 @@ if __name__ == "__main__":
                 for param, target_param in zip(qf2.parameters(), qf2_target.parameters()):
                     target_param.data.copy_(args.tau * param.data + (1 - args.tau) * target_param.data)
 
-            if global_step % 100 == 0:
+            if args.policy_frequency < 100:
+                rec_freq = 100
+            else:
+                rec_freq = args.policy_frequency
+            if global_step % rec_freq == 0:
                 writer.add_scalar("losses/qf1_values", qf1_a_values.mean().item(), global_step)
                 writer.add_scalar("losses/qf2_values", qf2_a_values.mean().item(), global_step)
                 writer.add_scalar("losses/qf1_loss", qf1_loss.item(), global_step)

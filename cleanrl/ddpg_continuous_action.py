@@ -2,8 +2,11 @@
 import argparse
 import os
 import random
+import sys 
 import time
 from distutils.util import strtobool
+
+sys.path.append('./')
 
 import gymnasium as gym
 import numpy as np
@@ -13,6 +16,10 @@ import torch.nn.functional as F
 import torch.optim as optim
 from stable_baselines3.common.buffers import ReplayBuffer
 from torch.utils.tensorboard import SummaryWriter
+
+from envs.asu.env import make_asu_env
+from envs.parafoil.simple_env import make_parafoil_env
+from envs.shell.shell import make_shell_env
 
 
 def parse_args():
@@ -71,13 +78,26 @@ def parse_args():
 
 def make_env(env_id, seed, idx, capture_video, run_name):
     def thunk():
-        if capture_video and idx == 0:
-            env = gym.make(env_id, render_mode="rgb_array")
-            env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
-        else:
-            env = gym.make(env_id)
+        # if capture_video:
+        #     env = gym.make(env_id, render_mode="rgb_array")
+        # else:
+        #     env = gym.make(env_id)
+        # env = gym.wrappers.RecordEpisodeStatistics(env)
+        # if capture_video:
+        #     if idx == 0:
+        #         env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
+        # env.action_space.seed(seed)
+        # env.observation_space.seed(seed)
+
+        env = make_asu_env(idx)
+        env = gym.wrappers.FlattenObservation(env)
         env = gym.wrappers.RecordEpisodeStatistics(env)
-        env.action_space.seed(seed)
+        if capture_video:
+            if idx == 0:
+                env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
+
+        env = gym.wrappers.ClipAction(env)
+
         return env
 
     return thunk

@@ -1,9 +1,13 @@
 # docs and experiment results can be found at https://docs.cleanrl.dev/rl-algorithms/ppo/#ppo_continuous_actionpy
 import argparse
+import copy
 import os
 import random
+import sys
 import time
 from distutils.util import strtobool
+
+sys.path.append('./')
 
 import gymnasium as gym
 import numpy as np
@@ -13,13 +17,19 @@ import torch.optim as optim
 from torch.distributions.normal import Normal
 from torch.utils.tensorboard import SummaryWriter
 
+from envs.asu.env import make_asu_env
+from envs.parafoil.simple_env import make_parafoil_env
+from envs.shell.shell import make_shell_env
+from rl_plotter.logger import Logger
+
+# os.environ['WANDB_MODE'] = 'offline'
 
 def parse_args():
     # fmt: off
     parser = argparse.ArgumentParser()
     parser.add_argument("--exp-name", type=str, default=os.path.basename(__file__).rstrip(".py"),
         help="the name of this experiment")
-    parser.add_argument("--seed", type=int, default=1,
+    parser.add_argument("--seed", type=int, default=1234,
         help="seed of the experiment")
     parser.add_argument("--torch-deterministic", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
         help="if toggled, `torch.backends.cudnn.deterministic=False`")
@@ -33,13 +43,22 @@ def parse_args():
         help="the entity (team) of wandb's project")
     parser.add_argument("--capture-video", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
         help="whether to capture videos of the agent performances (check out `videos` folder)")
+    parser.add_argument('--save-model', type=bool, default=False,
+        help="whether to save model during the training process")
+    parser.add_argument('--save-best-model', type=bool, default=True,
+        help="whether to save best model during the training process")
+    parser.add_argument('--save-interval', type=int, default=50,
+        help="save model weights every n num_update")
+    parser.add_argument('--plot-logger', type=bool, default=False,
+        help="whether to use logger to plot the training process")
+
 
     # Algorithm specific arguments
     parser.add_argument("--env-id", type=str, default="HalfCheetah-v4",
         help="the id of the environment")
-    parser.add_argument("--total-timesteps", type=int, default=1000000,
+    parser.add_argument("--total-timesteps", type=int, default=20000000,
         help="total timesteps of the experiments")
-    parser.add_argument("--learning-rate", type=float, default=3e-4,
+    parser.add_argument("--learning-rate", type=float, default=3e-4,   
         help="the learning rate of the optimizer")
     parser.add_argument("--num-envs", type=int, default=1,
         help="the number of parallel game environments")
@@ -59,7 +78,7 @@ def parse_args():
         help="Toggles advantages normalization")
     parser.add_argument("--clip-coef", type=float, default=0.2,
         help="the surrogate clipping coefficient")
-    parser.add_argument("--clip-vloss", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
+    parser.add_argument("--clip-vloss", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
         help="Toggles whether or not to use a clipped loss for the value function, as per the paper.")
     parser.add_argument("--ent-coef", type=float, default=0.0,
         help="coefficient of the entropy")
@@ -69,6 +88,10 @@ def parse_args():
         help="the maximum norm for the gradient clipping")
     parser.add_argument("--target-kl", type=float, default=None,
         help="the target KL divergence threshold")
+    
+    # Env args 
+    parser.add_argument("--qr", metavar=('q', 'r'), type=float, nargs=2, default=(1, 1),
+        help="The (q, r) pair value for Shell env")
     args = parser.parse_args()
     args.batch_size = int(args.num_envs * args.num_steps)
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
@@ -76,22 +99,27 @@ def parse_args():
     return args
 
 
-def make_env(env_id, idx, capture_video, run_name, gamma):
+def make_env(env_id, idx, capture_video, run_name, gamma, args, env_cfg=None):
     def thunk():
-        if capture_video:
-            env = gym.make(env_id, render_mode="rgb_array")
-        else:
-            env = gym.make(env_id)
+        # if capture_video:
+        #     env = gym.make(env_id, render_mode="rgb_array")
+        # else:
+        #     env = gym.make(env_id)
+        # q, r = args.qr
+        # env = make_shell_env(q, r)
+        env = make_asu_env(idx, env_config=env_cfg)
+        # env = gym.make('HalfCheetah-v4')
+        env = gym.wrappers.FrameStack(env, 10)
         env = gym.wrappers.FlattenObservation(env)  # deal with dm_control's Dict observation space
         env = gym.wrappers.RecordEpisodeStatistics(env)
         if capture_video:
             if idx == 0:
                 env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
         env = gym.wrappers.ClipAction(env)
-        env = gym.wrappers.NormalizeObservation(env)
-        env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10))
-        env = gym.wrappers.NormalizeReward(env, gamma=gamma)
-        env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
+        # env = gym.wrappers.NormalizeObservation(env)
+        # env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10))
+        # env = gym.wrappers.NormalizeReward(env, gamma=gamma)
+        # env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
         return env
 
     return thunk
@@ -106,19 +134,24 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
 class Agent(nn.Module):
     def __init__(self, envs):
         super().__init__()
+        hid = 64
         self.critic = nn.Sequential(
-            layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), 64)),
+            layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), hid)),
             nn.Tanh(),
-            layer_init(nn.Linear(64, 64)),
+            layer_init(nn.Linear(hid, hid)),
             nn.Tanh(),
-            layer_init(nn.Linear(64, 1), std=1.0),
+            layer_init(nn.Linear(hid, hid)),
+            nn.Tanh(),
+            layer_init(nn.Linear(hid, 1), std=1.0),
         )
         self.actor_mean = nn.Sequential(
-            layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), 64)),
+            layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), hid)),
             nn.Tanh(),
-            layer_init(nn.Linear(64, 64)),
+            layer_init(nn.Linear(hid, hid)),
             nn.Tanh(),
-            layer_init(nn.Linear(64, np.prod(envs.single_action_space.shape)), std=0.01),
+            layer_init(nn.Linear(hid, hid)),
+            nn.Tanh(),
+            layer_init(nn.Linear(hid, np.prod(envs.single_action_space.shape)), std=0.01),
         )
         self.actor_logstd = nn.Parameter(torch.zeros(1, np.prod(envs.single_action_space.shape)))
 
@@ -136,8 +169,37 @@ class Agent(nn.Module):
 
 
 if __name__ == "__main__":
+    # DEFINE BASIC VARIABLES AND PREPROCESSINGS
+    best_rewards = -np.inf
     args = parse_args()
-    run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
+    q, r = args.qr
+    print('Q, R', q, r)
+    # run_name = f"{args.env_id}_q_{q}_r_{r}_{args.seed}_{int(time.time())}"
+    # run_name = f"{args.env_id}_{args.seed}_{int(time.time())}"
+    exp_num = 0 
+    run_name = f"{args.exp_name}_{args.env_id}-"
+    while True:
+        if os.path.exists(f"./runs/{run_name}{str(exp_num)}"):
+            exp_num += 1
+        else:
+            # os.makedirs(f"{run_name}-{str(exp_num)}/")
+            run_name = run_name + str(exp_num)
+            model_path = f'./models/{run_name}'
+            break 
+
+    if args.save_model or args.save_best_model:
+        model_path = f'./models/{run_name}'
+        os.makedirs(model_path, exist_ok=True)
+
+    if args.plot_logger:
+        logger = Logger(
+            log_dir="./runs/",
+            exp_name=args.exp_name,
+            # env_name=f"{args.env_id}_zeta_{r/q:.2f}",
+            env_name=f"{args.env_id}",
+            seed=args.seed,
+        )
+
     if args.track:
         import wandb
 
@@ -166,7 +228,7 @@ if __name__ == "__main__":
 
     # env setup
     envs = gym.vector.SyncVectorEnv(
-        [make_env(args.env_id, i, args.capture_video, run_name, args.gamma) for i in range(args.num_envs)]
+        [make_env(args.env_id, i, args.capture_video, run_name, args.gamma, args) for i in range(args.num_envs)]
     )
     assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
 
@@ -190,10 +252,13 @@ if __name__ == "__main__":
     num_updates = args.total_timesteps // args.batch_size
 
     for update in range(1, num_updates + 1):
+
         # Annealing the rate if instructed to do so.
         if args.anneal_lr:
-            frac = 1.0 - (update - 1.0) / num_updates
-            lrnow = frac * args.learning_rate
+            # frac = 1.0 - (update - 1.0) / num_updates
+            # lrnow = frac * args.learning_rate
+            progress_remain = 1 - global_step / args.total_timesteps
+            lrnow = args.learning_rate / (4 ** (1 - progress_remain))
             optimizer.param_groups[0]["lr"] = lrnow
 
         for step in range(0, args.num_steps):
@@ -224,7 +289,19 @@ if __name__ == "__main__":
                     continue
                 print(f"global_step={global_step}, episodic_return={info['episode']['r']}")
                 writer.add_scalar("charts/episodic_return", info["episode"]["r"], global_step)
-                writer.add_scalar("charts/episodic_length", info["episode"]["l"], global_step)
+                writer.add_scalar("charts/episodic_length", info["episode" ]["l"], global_step)
+                
+                if args.plot_logger:
+                    logger.update(
+                        score=[info["episode"]["r"]],
+                        total_steps=global_step,
+                        )
+
+                if args.save_best_model:
+                    if info['episode']['r'] > best_rewards:
+                        best_rewards = info['episode']['r']
+                        torch.save(agent.state_dict(), os.path.join(model_path, 'best_agent.pt'))
+                        # envs.envs[0].model.save_checkpoint(os.path.join(model_path, 'best_model.pt'))
 
         # bootstrap value if not done
         with torch.no_grad():
@@ -304,7 +381,7 @@ if __name__ == "__main__":
             if args.target_kl is not None:
                 if approx_kl > args.target_kl:
                     break
-
+                
         y_pred, y_true = b_values.cpu().numpy(), b_returns.cpu().numpy()
         var_y = np.var(y_true)
         explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
@@ -321,5 +398,37 @@ if __name__ == "__main__":
         print("SPS:", int(global_step / (time.time() - start_time)))
         writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
 
+        # DO EVALUATION AND SAVE MODEL 
+
+        if args.save_model and (update + 1) % args.save_interval == 0:
+            torch.save(agent.state_dict(), f"./models/{run_name}/agent_{update+1}.pt")
+
+            # envs_eval = gym.vector.SyncVectorEnv(
+            #     [make_env(args.env_id, i, args.capture_video, run_name, args.gamma) for i in range(args.num_envs)])
+            # agent = Agent(envs_eval).to(device)
+            # agent.load_state_dict(torch.load(f"./models/{run_name}/agent.pt"))
+
+            # next_obs_eval, _ = envs_eval.reset() 
+            # returns_eval = [] 
+            # while len(returns_eval) < 10:
+            #     while True:
+            #         with torch.no_grad():
+            #             a_eval, _, _, _ = agent.get_action_and_value(torch.FloatTensor(next_obs_eval))
+            #             next_obs_eval, reward_eval, terminated_eval, truncated_eval, infos_eval = envs.step(a_eval.cpu().numpy())
+            #         done_eval = np.logical_or(terminated_eval, truncated_eval)[0]
+            #         if "final_info" not in infos_eval:
+            #             continue
+            #         for info in infos_eval["final_info"]:
+            #             if info is None:
+            #                 continue
+            #             # print(f"eval_episodic_return={info['episode']['r']}")
+            #             returns_eval.append(info["episode"]["r"])
+            #         if done_eval:
+            #             break 
+            # print('----------- EVALUATION ---------------')
+            # print('EPISODE REWARD: ', np.average(returns_eval))
+            # print('--------------------------------------')            
+
     envs.close()
     writer.close()
+
