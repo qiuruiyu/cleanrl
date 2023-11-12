@@ -19,12 +19,12 @@ class ASUEnv(gym.Env):
         """
         System initialization, 7x7 system 
         """
-        self.Tsim = env_config['Tsim'] if 'Tsim' in env_config.keys() else 2500
+        self.Tsim = env_config['Tsim'] if 'Tsim' in env_config.keys() else 500
         self.obs_dict = env_config['obs_dict'] if 'obs_dict' in env_config.keys() else False
-        self.y_idx = [0, 1, 2]
-        self.nu = 3
+        self.y_idx = [0, 1, 2, 6]
+        self.nu = 4
         self.ny = len(self.y_idx)
-        self.back = 1
+        self.back = 10
         # self.back = self.Tsim
         self.total_reward = []
         self.u0 = np.array([
@@ -57,18 +57,14 @@ class ASUEnv(gym.Env):
         ]).reshape(-1, 1)
 
         # self.goal = np.array([
-        #     97000, 
-        #     18500,
-        #     39000,           
+        #     np.random.uniform(96000, 99000),
+        #     np.random.uniform(18500, 19000),
+        #     np.random.uniform(38500, 39976),           
         #     1.57, 
         #     99.7332, 
         #     0.3508, 
         #     9.3461,
         # ]).reshape(-1, 1)
-        
-        # self.k = np.array([99000-93285, 19000-17940, 39976-37672]).reshape(-1, 1) / np.array([97000-93285, 18500-17940, 39000-37672]).reshape(-1, 1)
-        
-        self.k = np.array([1, 1, 1]).reshape(-1, 1)
         
         self.u0 = self.u0[:self.nu].reshape(-1, 1)
         self.y0 = self.y0[self.y_idx].reshape(-1, 1)
@@ -97,7 +93,7 @@ class ASUEnv(gym.Env):
         ==================================================
         '''
         if self.nu == 4:
-            self.action_low = np.array([-6, -4e-3, -1e-2, 0]).astype(np.float32) * 10
+            self.action_low = np.array([-6, -4e-3, -1e-2, -2e-3]).astype(np.float32) * 10
             self.action_high = np.array([6, 4e-3, 1e-2, 2e-3]).astype(np.float32) * 10
         elif self.nu == 3:
             # self.action_low = np.array([0, 0, 0]).astype(np.float32) * 10 
@@ -105,8 +101,6 @@ class ASUEnv(gym.Env):
             self.action_high = np.array([6, 4e-3, 1e-2]).astype(np.float32) * 10
         else:
             raise NotImplementedError
-        
-        # self.action_low = -self.action_high
 
         self.action_space = spaces.Box(
             -1, 1,
@@ -115,8 +109,8 @@ class ASUEnv(gym.Env):
 
         '''
         ================= observation space ================ 
-        | e | 
-        | u | 
+                            | e | 
+                            | u | 
         ====================================================
         '''
         if self.obs_dict:
@@ -165,7 +159,6 @@ class ASUEnv(gym.Env):
             return tuple(obs_info)
         else:
             integral_error_ = obs[:self.ny, :] * self.integral_error_scale
-            # relative_y = obs[:self.ny, :]
             error_ = obs[self.ny:2*self.ny, :]
             u_ = obs[-2*self.nu:-self.nu, :]
             du_ = obs[-self.nu:, :]
@@ -212,8 +205,10 @@ class ASUEnv(gym.Env):
         '''
         if self.obs_dict:
             self.state = {
+                "int_error": integral_error_,
                 "error": error_,
                 "u": u_,
+                "du": du_,
             }
         else:
             self.state = np.vstack((
@@ -351,47 +346,105 @@ class ASUEnv(gym.Env):
         reward = 0 
         terminated = False
         truncated = False
+        
+        # reward dict 
+        r_mse = 0 
+        r_energy = 0 
+        r_overshoot = 0
 
         """Terminated and Truncated Judgement"""
         if self.num_step == self.Tsim:
             truncated = True
-            if len(self.total_reward) % 30 == 1:
-                os.makedirs('runs/figs', exist_ok=True)
-                self.render_plot()
+            # if len(self.total_reward) % 30 == 1:
+            #     os.makedirs('runs/figs', exist_ok=True)
+            #     self.render_plot()
 
         """Reward Design"""
         # mse error of 3 deterministic vars in y 
-        reward -= np.sum((current_error[:3])**2)
-        # mse error of other vars in y
-        # reward -= 0.2 * np.sum((current_error[3:] - self.epsilon)**2)
-        # reward -= 0.3 * np.sum((current_error[-1] - self.epsilon)**2)
+        # reward -= np.sum((current_error[:3])**2)
+        reward -= np.sum((current_error[:3])**2) * (self.num_step / self.Tsim) * 100
+        # mse error of other vars in y, mainly focusing on final error 
+        for i in range(3, self.ny):
+            # reward -= current_error[i]**2 * 0.3
+            reward -= current_error[i]**2 * 0.3 * (self.num_step / self.Tsim) * 100 
+        
+        # r_mse record 
+        r_mse = -np.sum((current_error[:3])**2) * (self.num_step / self.Tsim) * 100 - current_error[i]**2 * 0.3 * (self.num_step / self.Tsim) * 100 
+
     
         # consumption of 3 vars in u, action is [-1, 1]
-        reward -= np.sum(action**2) * 0.005
+        reward -= np.exp(self.num_step / self.Tsim) * np.sum(action[:3]**2) * 0.0015
         
-        # reward for range of y composition
-        # if self.ysim[self.num_step, -1]: 
-        #     reward += 10
-        # if self.ysim[self.num_step, -1] < 9:
-        #     reward -= np.abs(self.ysim[self.num_step, -1] - 9)
-        # if self.ysim[self.num_step, -1] > 9.5:
-        #     reward -= np.abs(self.ysim[self.num_step, -1] - 9.5)
+        for i in range(3, self.nu):
+            reward -= np.exp(self.num_step / self.Tsim) * np.sum(action[i]**2) * 0.0035 
+        
+        # r_energy record
+        r_energy = -np.exp(self.num_step / self.Tsim) * np.sum(action[:3]**2) * 0.0015 - np.exp(self.num_step / self.Tsim) * np.sum(action[3:]**2) * 0.0035
 
         # prevent over shooting
         for i in range(3):  # only for the 3 vars ahead
             if self.e0[i] * current_error[i] < 0:  # over shooting 
                 # reward -= self.num_step / self.Tsim * np.abs(current_error[i])
-                reward -= (current_error[i] - self.e0[i] * 1e-6) **2 * 10
+                reward -= (current_error[i] - self.e0[i] * 1e-6) **2 * 200
+                # r_overshoot record
+                r_overshoot -= np.sum((current_error[i] - self.e0[i] * 1e-6)) **2 * 200
+                
+        # prevent u over bounds
+        # ulb = [93000, 56, 47, 57]
+        # uub = [99000, 60, 57, 60]
+        # for i in range(self.nu):
+        #     if self.u[i] < ulb[i]:
+        #         reward -= ((ulb[i] - self.u[i]) / self.u0[i]) ** 2 * 200 
+        #     if self.u[i] > uub[i]:
+        #         reward -= ((self.u[i] - uub[i]) / self.u0[i]) ** 2 * 200
 
-        reward /= 4 
+        reward /= 50
 
         self.total_reward[-1] += reward 
 
-        return self.state, reward, terminated, truncated, {} 
+        return self.state, reward, terminated, truncated, {"r_mse": r_mse, "r_energy": r_energy, "r_overshoot": r_overshoot}
 
     def reset(self, *, seed: Optional[int] = None, options: Optional[Dict] = None):
         if seed is not None:
-            super().reset(seed=seed)    
+            super().reset(seed=seed) 
+            
+        self.goal = np.array([
+            np.random.uniform(97000, 99000),
+            np.random.uniform(18500, 19000),
+            np.random.uniform(39000, 39976),           
+            1.57, 
+            99.7332, 
+            0.3508, 
+            9.4285,
+            # 9.57,
+            # np.random.uniform(9.4, 9.8),
+        ]).reshape(-1, 1)
+        
+        # self.goal = np.array([
+        #     99000,
+        #     19000,
+        #     39976,
+        #     1.57, 
+        #     99.7332, 
+        #     0.3508, 
+        #     9.4285,
+        # ]).reshape(-1, 1)
+        
+        # self.goal = np.array([
+        #     98485,
+        #     18900,
+        #     39772,
+        #     1.434+0.1490, 
+        #     99.7648-0.0305, 
+        #     0.317+0.026, 
+        #     9.4285,
+        # ]).reshape(-1, 1)
+
+        self.goal = self.goal[self.y_idx].reshape(-1, 1)
+
+        self.e0_real = self.goal - self.y0  # init real error 
+        self.e0 = (self.goal - self.y0) / self.e0_real  # init scaled error 
+        ##   
 
         self.num_step = 0
         self.total_reward.append(0)
@@ -413,13 +466,16 @@ class ASUEnv(gym.Env):
 
         return self.state, {} 
  
-def make_asu_env(rank=0, seed=0):
-    env = ASUEnv(
-        {
-            'Tsim': 500,
-            'obs_dict': False
-        }
-    )
+def make_asu_env(rank=0, seed=0, env_config=None):
+    if env_config is None: 
+        env = ASUEnv(
+            {
+                'Tsim': 500,
+                'obs_dict': False,
+            }
+        )
+    else:
+        env = ASUEnv(env_config)
     env.reset(seed=seed+rank)
     return env
 

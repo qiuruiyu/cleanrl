@@ -76,12 +76,12 @@ def parse_args():
 
 def make_env(env_id, seed, idx, capture_video, run_name):
     def thunk():
-        # env = gym.make(env_id)
+        env = gym.make(env_id)
         # env = gym.wrappers.RecordEpisodeStatistics(env)
         # if capture_video:
         #     if idx == 0:
         #         env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
-        env = make_asu_env() 
+        # env = make_asu_env() 
         env = gym.wrappers.FlattenObservation(env)  # deal with dm_control's Dict observation space
         env = gym.wrappers.RecordEpisodeStatistics(env)
         env = gym.wrappers.ClipAction(env)

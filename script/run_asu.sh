@@ -3,71 +3,80 @@
 # script for 4x4 ASU example 
 # script all features added 
 
-# rm -rf ./runs/ppo_continuous_action_control_ai701*
-# rm -rf ./models/ppo_continuous_action_control_ai701*
+# --track True \
+# --wandb-project-name ASU \
+
 rm -rf ./runs/figs/
 
+# python ./cleanrl/ppo_continuous_action.py \
+#     --env-id stable4x4 \
+#     --total-timesteps 7000000 \
+#     --track True \
+#     --wandb-project-name ASU \
+#     --num-envs 5 \
+#     --save-best-model True \
+#     --gamma 0.99 \
+#     --seed 43124 \
+#     --num-steps 8192 \
+#     --plot-logger True \
+        
+
 python ./cleanrl/ppo_continuous_action.py \
-    --env-id control_asu4 \
-    --total-timesteps 10000000 \
+    --env-id stable4x4 \
+    --total-timesteps 7000000 \
+    --track True \
+    --wandb-project-name ASU \
     --num-envs 5 \
     --save-best-model True \
     --gamma 0.99 \
-    --seed 1234 \
-    --num-steps 4096 \
+    --seed 4321 \
+    --num-steps 8192 \
     --plot-logger True \
-    
 
-# python ./cleanrl/ppo_continuous_action.py \
-#     --env-id control_y4 \
-#     --total-timesteps 5000000 \
-#     --num-envs 5 \
-#     --save-best-model True \
-#     --gamma 0.99 \
-#     --seed 1235 \
-#     --plot-logger True \
+python ./cleanrl/ppo_continuous_action.py \
+    --env-id stable4x4 \
+    --total-timesteps 7000000 \
+    --track True \
+    --wandb-project-name ASU \
+    --num-envs 5 \
+    --save-best-model True \
+    --gamma 0.99 \
+    --seed 6522 \
+    --num-steps 8192 \
+    --plot-logger True \
 
-# python ./cleanrl/ppo_continuous_action.py \
-#     --env-id control_y4 \
-#     --total-timesteps 5000000 \
-#     --num-envs 5 \
-#     --save-best-model True \
-#     --gamma 0.99 \
-#     --seed 1236 \
-#     --plot-logger True \
+python ./cleanrl/ppo_continuous_action.py \
+    --env-id stable4x4 \
+    --total-timesteps 7000000 \
+    --track True \
+    --wandb-project-name ASU \
+    --num-envs 5 \
+    --save-best-model True \
+    --gamma 0.99 \
+    --seed 1237 \
+    --num-steps 8192 \
+    --plot-logger True \
 
-# python ./cleanrl/ppo_continuous_action.py \
-#     --env-id control_y4 \
-#     --total-timesteps 5000000 \
-#     --num-envs 5 \
-#     --save-best-model True \
-#     --gamma 0.99 \
-#     --seed 1237 \
-#     --plot-logger True \
+python ./cleanrl/ppo_continuous_action.py \
+    --env-id stable4x4 \
+    --total-timesteps 7000000 \
+    --track True \
+    --wandb-project-name ASU \
+    --num-envs 5 \
+    --save-best-model True \
+    --gamma 0.99 \
+    --seed 6523 \
+    --num-steps 8192 \
+    --plot-logger True \
 
-# python ./cleanrl/ppo_continuous_action.py \
-#     --env-id control_y4 \
-#     --total-timesteps 5000000 \
-#     --num-envs 5 \
-#     --save-best-model True \
-#     --gamma 0.99 \
-#     --seed 1238 \
-#     --plot-logger True \
-
-# python ./cleanrl/ppo_continuous_action.py \
-#     --env-id control_y4 \
-#     --total-timesteps 5000000 \
-#     --num-envs 5 \
-#     --save-best-model True \
-#     --gamma 0.99 \
-#     --seed 1239 \
-#     --plot-logger True \
-
-# python ./cleanrl/ppo_continuous_action.py \
-#     --env-id control_y4 \
-#     --total-timesteps 5000000 \
-#     --num-envs 5 \
-#     --save-best-model True \
-#     --gamma 0.99 \
-#     --seed 1240 \
-#     --plot-logger True \
+python ./cleanrl/ppo_continuous_action.py \
+    --env-id stable4x4 \
+    --total-timesteps 7000000 \
+    --track True \
+    --wandb-project-name ASU \
+    --num-envs 5 \
+    --save-best-model True \
+    --gamma 0.99 \
+    --seed 3214 \
+    --num-steps 8192 \
+    --plot-logger True \

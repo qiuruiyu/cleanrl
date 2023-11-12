@@ -17,7 +17,7 @@ import torch.optim as optim
 from torch.distributions.normal import Normal
 from torch.utils.tensorboard import SummaryWriter
 
-from envs.asu.env_with_model import make_asu_env
+from envs.asu.env import make_asu_env
 from envs.parafoil.simple_env import make_parafoil_env
 from envs.shell.shell import make_shell_env
 from rl_plotter.logger import Logger
@@ -108,15 +108,13 @@ def make_env(env_id, idx, capture_video, run_name, gamma, args, env_cfg=None):
         # q, r = args.qr
         # env = make_shell_env(q, r)
         env = make_asu_env(idx, env_config=env_cfg)
-        # env = make_parafoil_env() 
-        # env = gym.make('Pendulum-v1')
+        # env = gym.make('HalfCheetah-v4')
+        env = gym.wrappers.FrameStack(env, 10)
         env = gym.wrappers.FlattenObservation(env)  # deal with dm_control's Dict observation space
-        # env = gym.wrappers.NormalizeObservation(env)
         env = gym.wrappers.RecordEpisodeStatistics(env)
         if capture_video:
             if idx == 0:
                 env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
-        # env = gym.wrappers.NormalizeReward(env, gamma=gamma)
         env = gym.wrappers.ClipAction(env)
         # env = gym.wrappers.NormalizeObservation(env)
         # env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10))
@@ -291,7 +289,7 @@ if __name__ == "__main__":
                     continue
                 print(f"global_step={global_step}, episodic_return={info['episode']['r']}")
                 writer.add_scalar("charts/episodic_return", info["episode"]["r"], global_step)
-                writer.add_scalar("charts/episodic_length", info["episode"]["l"], global_step)
+                writer.add_scalar("charts/episodic_length", info["episode" ]["l"], global_step)
                 
                 if args.plot_logger:
                     logger.update(
@@ -303,7 +301,7 @@ if __name__ == "__main__":
                     if info['episode']['r'] > best_rewards:
                         best_rewards = info['episode']['r']
                         torch.save(agent.state_dict(), os.path.join(model_path, 'best_agent.pt'))
-                        envs.envs[0].model.save_checkpoint(os.path.join(model_path, 'best_model.pt'))
+                        # envs.envs[0].model.save_checkpoint(os.path.join(model_path, 'best_model.pt'))
 
         # bootstrap value if not done
         with torch.no_grad():
@@ -397,8 +395,6 @@ if __name__ == "__main__":
         writer.add_scalar("losses/approx_kl", approx_kl.item(), global_step)
         writer.add_scalar("losses/clipfrac", np.mean(clipfracs), global_step)
         writer.add_scalar("losses/explained_variance", explained_var, global_step)
-        # add model losses 
-        writer.add_scalar("losses/model_loss", envs.envs[0].losses[-1], global_step)
         print("SPS:", int(global_step / (time.time() - start_time)))
         writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
 
