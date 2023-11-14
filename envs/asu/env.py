@@ -36,6 +36,7 @@ class ASUEnv(gym.Env):
             # 17940,  # 氧气量
             # 37672,  # 氮气量
         ]).reshape(-1, 1)
+        
         self.y0 = np.array([
             93285,    # 空气量      FIC101
             17940,    # 氧气量      FIC102
@@ -45,36 +46,30 @@ class ASUEnv(gym.Env):
             0.317,    # 氮气纯度    AIAS103
             9.55,     # AI701   
         ]).reshape(-1, 1)
-
-        self.goal = np.array([
-            99000, 
-            19000,
-            39976,           
-            1.57,
-            99.7332, 
-            0.3508, 
-            9.3461,
-        ]).reshape(-1, 1)
-
-        # self.goal = np.array([
-        #     np.random.uniform(96000, 99000),
-        #     np.random.uniform(18500, 19000),
-        #     np.random.uniform(38500, 39976),           
-        #     1.57, 
-        #     99.7332, 
-        #     0.3508, 
-        #     9.3461,
+        
+        """decreasing condition"""
+        # self.u0 = np.array([
+        #     98485,  # 空气调节
+        #     56.466, # 氧气调节
+        #     47.4,   # 氮气调节
+        #     57.34,  # V3调节
+        #     # 93285,  # 空气量
+        #     # 17940,  # 氧气量
+        #     # 37672,  # 氮气量
         # ]).reshape(-1, 1)
         
+        # self.goal = np.array([
+        #     98485,
+        #     18900,
+        #     39772,
+        #     1.434+0.1490, 
+        #     99.7648-0.0305, 
+        #     0.317+0.026, 
+        #     9.55,
+        # ]).reshape(-1, 1)
+
         self.u0 = self.u0[:self.nu].reshape(-1, 1)
         self.y0 = self.y0[self.y_idx].reshape(-1, 1)
-        self.goal = self.goal[self.y_idx].reshape(-1, 1)
-
-        self.e0_real = self.goal - self.y0  # init real error 
-        self.e0 = (self.goal - self.y0) / self.e0_real  # init scaled error 
-        
-        self.target = np.zeros((self.ny, 1))
-        self.epsilon = 0   # relaxable error
         
         # weight parameters 
         self.Q = np.ones((1, self.ny))
@@ -126,7 +121,7 @@ class ASUEnv(gym.Env):
                 shape=(2*self.ny+2*self.nu, self.back)
             )
 
-        self.state = self.assign_init_state() 
+        # self.state = self.assign_init_state() 
 
     def assign_init_state(self):
         error = np.repeat(self.e0, self.back, axis=1)
@@ -420,25 +415,15 @@ class ASUEnv(gym.Env):
             # np.random.uniform(9.4, 9.8),
         ]).reshape(-1, 1)
         
-        # self.goal = np.array([
-        #     99000,
-        #     19000,
-        #     39976,
-        #     1.57, 
-        #     99.7332, 
-        #     0.3508, 
-        #     9.4285,
-        # ]).reshape(-1, 1)
-        
-        # self.goal = np.array([
-        #     98485,
-        #     18900,
-        #     39772,
-        #     1.434+0.1490, 
-        #     99.7648-0.0305, 
-        #     0.317+0.026, 
-        #     9.4285,
-        # ]).reshape(-1, 1)
+        self.goal = np.array([
+            98485,
+            18900,
+            39772,
+            1.434+0.1490, 
+            99.7648-0.0305, 
+            0.317+0.026, 
+            9.4285,
+        ]).reshape(-1, 1)
 
         self.goal = self.goal[self.y_idx].reshape(-1, 1)
 
